@@ -1,6 +1,6 @@
 # Prediction-Powered Adaptive Shrinkage
 
-This repository contains the implementation of prediction-powered adaptive shrinkage methods for [brief description of your paper].
+This repository contains the implementation of prediction-powered adaptive shrinkage estimator.
 
 ## Directory Structure
 - `src/`: Contains all source code implementations
