@@ -11,7 +11,7 @@ This repository contains the implementation of prediction-powered adaptive shrin
     - `dataset.py`: Base class for dataset handling
     - `amazon_review.py`: Amazon Food Review dataset implementation
     - `galaxy_zoo.py`: Galaxy Zoo dataset implementation
-    - `toy_gaussian.py`: Toy Gaussian dataset implementation
+    - `synthetic_model.py`: Synthetic Gaussian dataset implementation
   - `scripts/`: Directory for scripts
     - `run_*.py`: Scripts for running different experiments
 - `data/`: Directory for storing datasets (not included in repository)
