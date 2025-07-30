@@ -3,7 +3,7 @@ Utility functions for calculating SURE, etc.
 """
 from scipy.optimize import minimize_scalar
 import numpy as np
-from typing import NamedTuple
+from typing import NamedTuple, Tuple, List
 import inspect
 
 
@@ -29,7 +29,7 @@ def get_decrease_fraction(y_true: np.ndarray, esimates: np.ndarray, mle: np.ndar
     # calculate number of points where (y_true - mle) ** 2 > (y_true - esimates) ** 2
     idx = (y_true - mle) ** 2 > (y_true - esimates) ** 2
     return np.mean(idx)
-    
+
 
 # get function default arguments
 def get_default_args(func):
@@ -40,10 +40,13 @@ def get_default_args(func):
         if v.default is not inspect.Parameter.empty
     }
 
+
 """
 Some visualization functions
 """
-def plot_estimators_over_problems(estimators: list[np.ndarray], names: list[str] = None, links: list[tuple[int, int]] = None):
+
+
+def plot_estimators_over_problems(estimators: List[np.ndarray], names: List[str] = None, links: List[Tuple[int, int]] = None):
     """
     Use seaborn to plot line plots of the estimators over the problems (id from 1 to len(n_problems)). Choose different colors and markers
     for each estimator. Link the 
@@ -68,8 +71,8 @@ def plot_estimators_over_problems(estimators: list[np.ndarray], names: list[str]
                      label=names[i], marker=markers[i], color=colors[i], linestyle='')
 
     for link in links:
-        assert len(link) == 2, 'Link should be a tuple of two integers'
-        assert 0 <= link[0] <= n_problems and 1 <= link[1] <= n_problems, 'Link should be a tuple of two integers'
+        assert len(link) == 2, 'Link should be a Tuple of two integers'
+        assert 0 <= link[0] <= n_problems and 1 <= link[1] <= n_problems, 'Link should be a Tuple of two integers'
         # plot vertical lines between estimators in `link` for each problem
         for problem in problem_idx:
             plt.vlines(problem, estimators[link[0] - 1][problem - 1],
@@ -87,19 +90,21 @@ def plot_estimators_over_problems(estimators: list[np.ndarray], names: list[str]
 """
 Legacy utils: functions that help the estimator calculations in `estimators.py`
 """
+
+
 class VarCovStats(NamedTuple):
     """Holds variance, covariance, and means for each problem."""
     var_pred: np.ndarray      # Variance of predictions for each problem
     cov_pred_y: np.ndarray    # Covariance of predictions and true y for each problem
     mean_y: np.ndarray        # MLE for each problem (i.e., y.mean())
     mean_pred_labelled: np.ndarray   # average of labelled predictions
-    mean_pred_unlabelled: np.ndarray # average of unlabelled predictions
+    mean_pred_unlabelled: np.ndarray  # average of unlabelled predictions
 
 
 def compute_var_cov(
-    pred_labelled: list[np.ndarray],
-    pred_unlabelled: list[np.ndarray],
-    y_labelled: list[np.ndarray],
+    pred_labelled: List[np.ndarray],
+    pred_unlabelled: List[np.ndarray],
+    y_labelled: List[np.ndarray],
     share_var: bool = False
 ) -> VarCovStats:
     """
@@ -120,7 +125,8 @@ def compute_var_cov(
         all_pred_unlabelled = np.concatenate(pred_unlabelled)
         all_y_labelled = np.concatenate(y_labelled)
 
-        global_var = np.concatenate([all_pred_labelled, all_pred_unlabelled]).var(ddof=1)
+        global_var = np.concatenate(
+            [all_pred_labelled, all_pred_unlabelled]).var(ddof=1)
         global_cov = np.cov(all_pred_labelled, all_y_labelled, ddof=1)[0, 1]
 
         # For each problem, store the same var/cov
@@ -136,7 +142,8 @@ def compute_var_cov(
         for i in range(M):
             preds_all = np.concatenate([pred_labelled[i], pred_unlabelled[i]])
             var_pred[i] = preds_all.var(ddof=1)
-            cov_pred_y[i] = np.cov(pred_labelled[i], y_labelled[i], ddof=1)[0, 1]
+            cov_pred_y[i] = np.cov(
+                pred_labelled[i], y_labelled[i], ddof=1)[0, 1]
             mean_y[i] = y_labelled[i].mean()
             mean_pred_labelled[i] = pred_labelled[i].mean()
             mean_pred_unlabelled[i] = pred_unlabelled[i].mean()
@@ -164,11 +171,12 @@ def combine_ppi_estimates(
     assert mean_y.shape == mean_pred_labelled.shape == mean_pred_unlabelled.shape, \
         "mean_y, mean_pred_labelled, and mean_pred_unlabelled should have the same shape"
     # lambdas is either a scalar or a vector with the same shape as mean_y
-    assert lambdas.shape == mean_y.shape or len(lambdas) == 1, "lambdas should be a scalar or a vector with the same shape as mean_y"
+    assert lambdas.shape == mean_y.shape or len(
+        lambdas) == 1, "lambdas should be a scalar or a vector with the same shape as mean_y"
     return mean_y + lambdas * (mean_pred_unlabelled - mean_pred_labelled)
 
 
 if __name__ == '__main__':
-    fig = plot_estimators_over_products([np.random.rand(10), np.random.rand(10)], [
+    fig = plot_estimators_over_problems([np.random.rand(10), np.random.rand(10)], [
                                         'Estimator 1', 'Estimator 2'], [(1, 2)])
     fig.savefig('test.png')

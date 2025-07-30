@@ -3,10 +3,12 @@ import numpy as np
 from pathlib import Path
 import h5py
 from config import DATA_PATHS
+from typing import Tuple, List
 
 # Get data paths from config
 AMAZON_FOOD_REVIEW_TUNED = Path(DATA_PATHS["amazon"]["tuned"])
 AMAZON_FOOD_REVIEW_RAW = Path(DATA_PATHS["amazon"]["raw"])
+
 
 class AmazonReviewDataset(PasDataset):
     """ 
@@ -14,13 +16,14 @@ class AmazonReviewDataset(PasDataset):
     - raw data: https://www.kaggle.com/datasets/snap/amazon-fine-food-reviews
     - pretrained model: https://huggingface.co/nlptown/bert-base-multilingual-uncased-sentiment
     """
-    def __init__(self, file_path: Path = None, 
+
+    def __init__(self, file_path: Path = None,
                  tuned: bool = True,
-                 train_test_split: float = 0.2, 
-                 split_seed: int = 42, 
+                 train_test_split: float = 0.2,
+                 split_seed: int = 42,
                  verbose: bool = False):
         # override the `tuned` flag if the file path is provided
-        if file_path is not None:    
+        if file_path is not None:
             self.file_path = file_path
             dataset_name = "Amazon_food_custom"
         else:
@@ -43,7 +46,7 @@ class AmazonReviewDataset(PasDataset):
         # cache the product reviews
         self.product_reviews = product_reviews
 
-    def load_data(self, train_test_split: float = None, split_seed: int = None) -> tuple[list[np.ndarray], list[np.ndarray], list[np.ndarray], list[np.ndarray], np.ndarray]:
+    def load_data(self, train_test_split: float = None, split_seed: int = None) -> Tuple[List[np.ndarray], List[np.ndarray], List[np.ndarray], List[np.ndarray], np.ndarray]:
         if not hasattr(self, "product_reviews"):
             self._read_raw_data()
 
@@ -66,17 +69,20 @@ class AmazonReviewDataset(PasDataset):
 
             # calculate the `true` theta through y_unlabelled
             true_theta.append(np.mean(y_unlabelled[-1]))
-        
+
         if self.verbose:
-            print(f"`{self.dataset_name}` data loaded successfully from `{self.file_path}`")
+            print(
+                f"`{self.dataset_name}` data loaded successfully from `{self.file_path}`")
 
         return pred_labelled, y_labelled, pred_unlabelled, y_unlabelled, np.array(true_theta)
 
-
     def reload_data(self, train_test_split: float = 0.2, split_seed: int = 42) -> None:
         """ Reload the dataset with new split parameters.
-        """        
-        pred_labelled, y_labelled, pred_unlabelled, y_unlabelled, true_theta = self.load_data(train_test_split, split_seed)
+        """
+        pred_labelled, y_labelled, pred_unlabelled, y_unlabelled, true_theta = self.load_data(
+            train_test_split, split_seed)
 
-        self.validate_data(pred_labelled, y_labelled, pred_unlabelled, y_unlabelled)
-        self.set_metadata(pred_labelled, y_labelled, pred_unlabelled, y_unlabelled, true_theta)
+        self.validate_data(pred_labelled, y_labelled,
+                           pred_unlabelled, y_unlabelled)
+        self.set_metadata(pred_labelled, y_labelled,
+                          pred_unlabelled, y_unlabelled, true_theta)
