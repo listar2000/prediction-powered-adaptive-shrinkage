@@ -1,0 +1,15 @@
+# Common python gitignore
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pyw
+*.pyz
+
+# Python virtual environment
+.venv/
+results/*
+
+.DS_Store
