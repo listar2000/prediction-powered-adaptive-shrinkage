@@ -20,7 +20,7 @@ pip install -r requirements.txt
 
 4. To test the installation, you can try to run the following demo script:
 ```bash
-python src/scripts/run_synthetic.py
+python src/scripts/run_galaxy_zoo.py
 ```
 
 You should then see a progress bar as we simulate many repeated runs. After that, several metrics for the estimators will be printed out.
