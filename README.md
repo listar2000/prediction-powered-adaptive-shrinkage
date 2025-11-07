@@ -143,6 +143,11 @@ Here, the arguments are:
 
 You can also use the `run_benchmark_timing` function to time the execution of each estimator.
 
+## Change Log:
+
+- 2025-11-07: We fix an issue with the synthetic dataset (where we can obtain closed-form expressions for the second-moments) that previously omitted the division by the number of labelled data points (i.e. $n_j$).
+
+
 ## Roadmap:
 
 - [x] Clean up and reorg the codebase, rewrite `README.md`.
