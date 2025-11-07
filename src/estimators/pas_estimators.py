@@ -43,22 +43,19 @@ def get_shrinkage_only_estimators(data: PasDataset, get_lambdas: bool = False, s
     var_y, f_x_tilde_bar, y_bar = [], [], []
     for i in range(data.M):
         n = data.ns[i]
-        # N = data.Ns[i]
         if share_var:
-            # var_y.append(data.pred_labelled[i].var(ddof=1) / N)
-            var_y.append(data.y_labelled[i].var(ddof=1) / n)
+            var_y.append(data.y_labelled[i].var(ddof=1))
         f_x_tilde_bar.append(data.pred_unlabelled[i].mean())
         y_bar.append(data.y_labelled[i].mean())
 
     if not share_var:
         var_y = np.concatenate(data.y_labelled).var(ddof=1)
-        var_y = var_y / data.ns
 
     if data.has_true_vars:
-        var_y = data.true_vars
+        var_y = data.true_y_vars
 
     f_x_tilde_bar, y_bar, var_y = np.array(
-        f_x_tilde_bar), np.array(y_bar), np.array(var_y)
+        f_x_tilde_bar), np.array(y_bar), np.array(var_y) / data.ns
 
     def sure_fn(lambda_: float) -> float:
         return np.sum((var_y / (var_y + lambda_) ** 2)
@@ -102,8 +99,8 @@ def get_pas_estimators(data: PasDataset, get_lambdas: bool = False, get_omegas: 
         data, get_lambdas=True, share_var=share_var)
 
     if data.has_true_vars:
-        var_f_x = data.true_fx_vars
-        var_y = data.true_vars
+        var_y = data.true_y_vars
+        var_f_x = data.true_vars
         cov_y_f_x = data.true_covs
     else:
         var_y = np.concatenate(data.y_labelled).var(ddof=1)
@@ -159,8 +156,8 @@ def get_shrinkage_to_mean_estimators(data: PasDataset, get_lambdas: bool = False
         data, get_lambdas=True, share_var=share_var)
 
     if data.has_true_vars:
-        var_f_x = data.true_fx_vars
-        var_y = data.true_vars
+        var_f_x = data.true_vars
+        var_y = data.true_y_vars
         cov_y_f_x = data.true_covs
     else:
         var_y = np.concatenate(data.y_labelled).var(ddof=1)

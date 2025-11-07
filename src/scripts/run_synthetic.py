@@ -25,7 +25,7 @@ if __name__ == "__main__":
     }
     # Run basic benchmark experiments with Gaussian V2 Dataset
     dataset = GaussianSyntheticDataset(
-        good_f=False, has_true_vars=True, split_seed=4321)
+        good_f=True, M=100, has_true_vars=True, split_seed=4321)
     dataset.additional_y_variance = 0.05
     mse_results = run_benchmark(
         dataset, trials=200, summary=True, estimator_kwargs=kwargs)
