@@ -8,11 +8,13 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 from config import DATA_PATHS
+from typing import Tuple, List
 
 # Get data paths from config
 GALAXY_ZOO_FILE_PATH = DATA_PATHS["galaxy"]["predictions"]
 
 SPIRAL_INDICES = set([3, 4, 5])
+
 
 class GalaxyZooDataset(PasDataset):
     """ 
@@ -20,9 +22,10 @@ class GalaxyZooDataset(PasDataset):
     - Binary classification: spiral (1) vs non-spiral (0) galaxies
     - Problems are grouped by WVT_BIN regions
     """
-    def __init__(self, file_path: Path = GALAXY_ZOO_FILE_PATH, 
-                 train_test_split: float = 0.2, 
-                 split_seed: int = 42, 
+
+    def __init__(self, file_path: Path = GALAXY_ZOO_FILE_PATH,
+                 train_test_split: float = 0.2,
+                 split_seed: int = 42,
                  verbose: bool = False):
         self.file_path = file_path
         self.train_test_split = train_test_split
@@ -37,11 +40,11 @@ class GalaxyZooDataset(PasDataset):
 
         # Read CSV data
         df = pd.read_csv(self.file_path)
-        
+
         # Convert labels to binary (1 for spiral galaxies, 0 otherwise)
         df['true_binary'] = df['true_label'].isin(SPIRAL_INDICES).astype(int)
         df['pred_binary'] = df['pred_label'].isin(SPIRAL_INDICES).astype(int)
-        
+
         # Group by WVT_BIN and cache as list of arrays
         self.galaxy_groups = []
         for _, group in df.groupby('WVT_BIN'):
@@ -52,7 +55,7 @@ class GalaxyZooDataset(PasDataset):
             ])
             self.galaxy_groups.append(group_array)
 
-    def load_data(self, train_test_split: float = None, split_seed: int = None) -> tuple[list[np.ndarray], list[np.ndarray], list[np.ndarray], list[np.ndarray], np.ndarray]:
+    def load_data(self, train_test_split: float = None, split_seed: int = None) -> Tuple[List[np.ndarray], List[np.ndarray], List[np.ndarray], List[np.ndarray], np.ndarray]:
         """ Load the dataset with specified split parameters.
         """
         if not hasattr(self, "galaxy_groups"):
@@ -70,7 +73,7 @@ class GalaxyZooDataset(PasDataset):
             # shuffle and split the dataset
             indices = np.random.permutation(n)
             split_idx = int(n * train_test_split)
-            
+
             # Split into labelled and unlabelled sets
             pred_labelled.append(galaxy_group[1, indices[:split_idx]])
             y_labelled.append(galaxy_group[0, indices[:split_idx]])
@@ -79,14 +82,17 @@ class GalaxyZooDataset(PasDataset):
 
             # Calculate true_theta as fraction of spiral galaxies in unlabelled set
             true_theta.append(np.mean(y_unlabelled[-1]))
-        
+
         if self.verbose:
-            print(f"`{self.dataset_name}` data loaded successfully from `{self.file_path}`")
+            print(
+                f"`{self.dataset_name}` data loaded successfully from `{self.file_path}`")
 
         return pred_labelled, y_labelled, pred_unlabelled, y_unlabelled, np.array(true_theta)
 
     def reload_data(self, train_test_split: float = 0.2, split_seed: int = 42) -> None:
         """ Reload the dataset with new split parameters.
-        """        
-        pred_labelled, y_labelled, pred_unlabelled, y_unlabelled, true_theta = self.load_data(train_test_split, split_seed)
-        self.set_metadata(pred_labelled, y_labelled, pred_unlabelled, y_unlabelled, true_theta)
+        """
+        pred_labelled, y_labelled, pred_unlabelled, y_unlabelled, true_theta = self.load_data(
+            train_test_split, split_seed)
+        self.set_metadata(pred_labelled, y_labelled,
+                          pred_unlabelled, y_unlabelled, true_theta)

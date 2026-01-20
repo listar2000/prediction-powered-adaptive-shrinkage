@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # cache folder
 .cache/
 */sample_data/
@@ -68,3 +69,20 @@ instance/
 
 # Jupyter Notebook
 .ipynb_checkpoints
+=======
+# Common python gitignore
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pyw
+*.pyz
+
+# Python virtual environment
+.venv/
+results/*
+
+.DS_Store
+>>>>>>> fd582ee2f9b9507a41d7dbe4672e30fb252dbcae

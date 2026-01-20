@@ -16,23 +16,21 @@ DATA_PATHS = {
 
 # Default kwargs for different experiments
 DEFAULT_KWARGS = {
-    "power_tuned_ppi": {
+    "pt": {
         "share_var": False,
         "get_lambdas": False
     },
-    "eb_sure": {
+    "shrinkage_only": {
         "get_lambdas": False,
         "share_var": False,
         "cutoff": 0.999
     },
-    "sure_ppi": {
+    "pas": {
         "get_lambdas": False,
         "share_var": False,
         "cutoff": 0.999,
-        "old_ver": False
     },
-    "split_sure_ppi": {
-        "split_ratio": 0.5,
+    "shrinkage_mean": {
         "cutoff": 0.999,
         "share_var": False,
         "get_lambdas": False
