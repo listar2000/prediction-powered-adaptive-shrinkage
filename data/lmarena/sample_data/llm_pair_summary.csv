@@ -1,4 +1,4 @@
-llm_p,llm_q,comparisons
+llm_a,llm_b,comparisons
 claude-opus-4-20250514,gemini-2.5-flash,172
 claude-3-5-sonnet-20241022,gemini-2.0-flash-001,161
 claude-opus-4-20250514,gemini-2.5-pro,145

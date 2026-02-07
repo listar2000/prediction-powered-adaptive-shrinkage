@@ -173,7 +173,7 @@ async def batch_judge(
         messages_dict[i] = messages
         
         # Create async task
-        task = asyncio.create_task(bounded_request(i, messages))
+        task = asyncio.create_task(bounded_request(int(i), messages))
         tasks.append((i, row, task))
     
     if skipped > 0:
@@ -294,7 +294,7 @@ def main():
     
     p_name = sanitize_filename(args.llm_p)
     q_name = sanitize_filename(args.llm_q)
-    output_path = os.path.join(args.output_dir, f"llm_judge_{p_name}_vs_{q_name}.csv")
+    output_path = os.path.join(args.output_dir, f"{p_name}_vs_{q_name}.csv")
     
     results_df = pd.DataFrame(results)
     results_df.to_csv(output_path, index=False)
@@ -310,8 +310,8 @@ def main():
     for pred, count in pred_counts.items():
         print(f"  {pred}: {count} ({count/len(results_df)*100:.1f}%)")
     
-    # Accuracy (where prediction != unknown)
-    valid_preds = results_df[results_df["prediction"] != "unknown"]
+    # Accuracy
+    valid_preds = results_df[results_df["prediction"].isin(["model_a", "model_b"])]
     if len(valid_preds) > 0:
         accuracy = (valid_preds["prediction"] == valid_preds["winner"]).mean()
         print(f"\nAccuracy (on {len(valid_preds)} valid predictions): {accuracy:.1%}")

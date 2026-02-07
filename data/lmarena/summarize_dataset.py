@@ -16,25 +16,33 @@ import argparse
 import os
 from datasets import load_dataset
 import pandas as pd
+import dotenv
 
+from run_judge_skywork import _is_single_turn
 
-def export_hf_home():
-    """Set HF_HOME to the custom cache directory."""
-    cur_dir = os.path.dirname(os.path.abspath(__file__))
-    os.environ["HF_HOME"] = os.path.join(cur_dir, "../../", ".cache/huggingface")
+dotenv.load_dotenv()
 
 
 def load_lmarena_dataset() -> pd.DataFrame:
     """Load the full LMArena dataset from HuggingFace."""
-    export_hf_home()
     ds = load_dataset("lmarena-ai/arena-human-preference-140k", split="train")
     return ds.to_pandas()
+
+
+def filter_single_turn_only(df: pd.DataFrame) -> pd.DataFrame:
+    """Filter the dataset to only include single-turn conversations.
+
+    which is defined by ``conversation_a`` and ``conversation_b`` columns are lists with exactly 2 elements.
+    we further check that the first element is a dict with role "user" and the second one a dict with role "assistant".
+    """
+    return df[df["conversation_a"].apply(_is_single_turn) & df["conversation_b"].apply(_is_single_turn)]
 
 
 def summarize_comparisons(
     df: pd.DataFrame,
     language: str | None = None,
     min_comparisons: int = 1,
+    single_turn_only: bool = False,
 ) -> pd.DataFrame:
     """
     Summarize the dataset into a ranked table of LLM pair comparisons.
@@ -56,15 +64,18 @@ def summarize_comparisons(
     if language is not None:
         df_filtered = df_filtered[df_filtered["language"] == language]
 
-    
+    # Filter to only include single-turn conversations if specified
+    if single_turn_only:
+        df_filtered = filter_single_turn_only(df_filtered)
+
     # Apply ordering (vectorized approach for speed)
     mask = df_filtered["model_a"] <= df_filtered["model_b"]
-    df_filtered["llm_p"] = df_filtered["model_a"].where(mask, df_filtered["model_b"])
-    df_filtered["llm_q"] = df_filtered["model_b"].where(mask, df_filtered["model_a"])
+    df_filtered["llm_a"] = df_filtered["model_a"].where(mask, df_filtered["model_b"])
+    df_filtered["llm_b"] = df_filtered["model_b"].where(mask, df_filtered["model_a"])
     
     # Group and count
     summary = (
-        df_filtered.groupby(["llm_p", "llm_q"])
+        df_filtered.groupby(["llm_a", "llm_b"])
         .size()
         .reset_index(name="comparisons")
     )
@@ -101,6 +112,11 @@ def main():
         help="Minimum number of comparisons to include a pair"
     )
     parser.add_argument(
+        "--single-turn-only", "-s",
+        action="store_true",
+        help="Only include single-turn conversations"
+    )
+    parser.add_argument(
         "--top-n", "-n",
         type=int,
         default=None,
@@ -117,6 +133,7 @@ def main():
         df,
         language=args.language,
         min_comparisons=args.min_comparisons,
+        single_turn_only=args.single_turn_only,
     )
     
     if args.top_n is not None:
