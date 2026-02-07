@@ -5,7 +5,9 @@ This module contains the prompt template for instructing an LLM judge to
 evaluate pairwise comparisons and predict which response the human preferred.
 """
 
-SYSTEM_PROMPT = """You are an impartial judge evaluating responses from two AI assistants (Model A and Model B) to a user's prompt.
+import re
+
+SYSTEM_PROMPT = """You are an impartial judge evaluating responses from two AI assistants (Model A and Model B) to a human asker's prompt.
 
 Your task is to determine which model's response is better based on:
 1. Helpfulness: Does the response address the user's request?
@@ -13,13 +15,14 @@ Your task is to determine which model's response is better based on:
 3. Clarity: Is the response well-organized and easy to understand?
 4. Completeness: Does it fully answer the question without unnecessary content?
 
-IMPORTANT: You must output ONLY one of these two options:
-- "WINNER: model_a" if Model A's response is better
-- "WINNER: model_b" if Model B's response is better
+IMPORTANT: You must output ONLY one of these two options, wrapped in <answer> tags:
 
-Do not explain your reasoning. Output only the winner line."""
+- "<answer>model_a</answer>" if Model A's response is better
+- "<answer>model_b</answer>" if Model B's response is better
 
-USER_PROMPT_TEMPLATE = """## User's Prompt
+No need to explain your reasoning. Output only the answer within the <answer> tags."""
+
+USER_PROMPT_TEMPLATE = """## Human Asker's Prompt
 {user_prompt}
 
 ---
@@ -69,60 +72,45 @@ def parse_judge_response(response: str) -> str:
         response: The raw response from the judge LLM
     
     Returns:
-        'model_a', 'model_b', or 'unknown' if parsing fails
+        'model_a', 'model_b', or 'parsing_error' if parsing fails
     """
     response_lower = response.strip().lower()
-    
-    # Look for explicit winner declaration
-    if "winner: model_a" in response_lower:
-        return "model_a"
-    elif "winner: model_b" in response_lower:
-        return "model_b"
-    
-    # Fallback: look for model mentions at the end
-    lines = response_lower.strip().split("\n")
-    last_line = lines[-1] if lines else ""
-    
-    if "model_a" in last_line and "model_b" not in last_line:
-        return "model_a"
-    elif "model_b" in last_line and "model_a" not in last_line:
-        return "model_b"
-    
-    return "unknown"
+
+    # use regex to extract the answer within the <answer> tags
+    match = re.search(r"<answer>(.*?)</answer>", response_lower)
+    if match:
+        return match.group(1)
+    return "parsing_error"
 
 
-def extract_conversation_content(full_conversation: dict) -> tuple[str, str, str]:
+def extract_conversation_content(conversation: dict) -> tuple[str, str, str]:
     """
-    Extract the user prompt and both model responses from the full_conversation field.
+    Extract the user prompt and both model responses from the conversation field.
     
-    The full_conversation is a dict with keys 'user', 'model_side_a', 'model_side_b'.
-    Each value is a dict with 'role' and 'content' (which is a numpy array of dicts).
+    The conversation is a dict with keys "user", "model_side_a", "model_side_b".
     
     Args:
-        full_conversation: The full_conversation dict from the dataset
+        conversation: The conversation dict from the dataset
     
     Returns:
         Tuple of (user_prompt, response_a, response_b) as strings
     """
+    def _extract_first_text_content(content_lst: list[dict]) -> str:
+        for content in content_lst:
+            if "type" in content and content["type"] == "text":
+                return content["text"]
+        raise ValueError("No text content found")
+
     # Extract user prompt
-    user_content = full_conversation.get("user", {}).get("content", [])
-    if hasattr(user_content, "__iter__") and len(user_content) > 0:
-        user_prompt = user_content[0].get("text", "") if isinstance(user_content[0], dict) else str(user_content[0])
-    else:
-        user_prompt = str(user_content)
+    user_content = conversation.get("user", {}).get("content", [])
+    user_prompt = _extract_first_text_content(user_content)
     
     # Extract Model A's response
-    model_a_content = full_conversation.get("model_side_a", {}).get("content", [])
-    if hasattr(model_a_content, "__iter__") and len(model_a_content) > 0:
-        response_a = model_a_content[0].get("text", "") if isinstance(model_a_content[0], dict) else str(model_a_content[0])
-    else:
-        response_a = str(model_a_content)
+    model_a_content = conversation.get("model_side_a", {}).get("content", [])
+    response_a = _extract_first_text_content(model_a_content)
     
     # Extract Model B's response
-    model_b_content = full_conversation.get("model_side_b", {}).get("content", [])
-    if hasattr(model_b_content, "__iter__") and len(model_b_content) > 0:
-        response_b = model_b_content[0].get("text", "") if isinstance(model_b_content[0], dict) else str(model_b_content[0])
-    else:
-        response_b = str(model_b_content)
+    model_b_content = conversation.get("model_side_b", {}).get("content", [])
+    response_b = _extract_first_text_content(model_b_content)
     
     return user_prompt, response_a, response_b

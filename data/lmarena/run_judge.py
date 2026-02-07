@@ -9,14 +9,14 @@ Usage:
        python -m sglang.launch_server --config-file data/lmarena/server_args.yaml
     
     2. Run this script:
-       python data/lmarena/run_judge.py --llm-p "gpt-4" --llm-q "claude-3-opus"
+       python data/lmarena/run_judge.py --llm-p "claude-opus-4-20250514" --llm-q "gemini-2.5-flash" --language "en"
 """
 
 import argparse
 import asyncio
 import os
 import re
-from ast import literal_eval
+import json_repair
 
 import pandas as pd
 from datasets import load_dataset
@@ -84,11 +84,14 @@ def safe_parse_conversation(conv_str):
     if isinstance(conv_str, dict):
         return conv_str
     if isinstance(conv_str, str):
+        # remove the beginning and ending white spaces
+        conv_str = conv_str.strip()
         try:
-            return literal_eval(conv_str)
-        except (ValueError, SyntaxError):
+            return json_repair.loads(conv_str)
+        except (ValueError, SyntaxError) as e:
+            print(f"Error parsing conversation: {e}")
             return None
-    return None
+    raise ValueError(f"Invalid conversation type: {type(conv_str)}")
 
 
 async def get_judge_response(
@@ -103,8 +106,12 @@ async def get_judge_response(
         response = await client.chat.completions.create(
             model=model_name,
             messages=messages,
-            temperature=0.1,  # Low temperature for consistent judgments
+            temperature=0.6,  # Low temperature for consistent judgments
+            top_p=0.9,
             max_tokens=max_tokens,
+            extra_body={
+                "chat_template_kwargs": {"enable_thinking": False},
+            },  # type: ignore
         )
         return task_idx, response.choices[0].message.content
     except Exception as e:
@@ -140,24 +147,12 @@ async def batch_judge(
     tasks = []
     skipped = 0
     
-    for i, row in df.iterrows():
-        # Parse the full_conversation
-        full_conv = safe_parse_conversation(row["full_conversation"])
-        if full_conv is None:
-            skipped += 1
-            results[i] = {
-                "id": row["id"],
-                "model_a": row["model_a"],
-                "model_b": row["model_b"],
-                "prediction": "unknown",
-                "winner": row["winner"],
-                "language": row.get("language", ""),
-            }
-            continue
-        
+    messages_dict = {}
+    for i, row in df.iterrows():        
         # Extract content
         try:
-            user_prompt, response_a, response_b = extract_conversation_content(full_conv)
+            conversation = row["full_conversation"][0]
+            user_prompt, response_a, response_b = extract_conversation_content(conversation)
         except Exception as e:
             print(f"Error extracting content for row {i}: {e}")
             skipped += 1
@@ -165,14 +160,17 @@ async def batch_judge(
                 "id": row["id"],
                 "model_a": row["model_a"],
                 "model_b": row["model_b"],
-                "prediction": "unknown",
+                "prediction": "prompt_error",
                 "winner": row["winner"],
                 "language": row.get("language", ""),
-            }
+                "messages": [],
+                "response": "",
+            }  # type: ignore
             continue
         
         # Format the judge prompt
         messages = format_judge_prompt(user_prompt, response_a, response_b)
+        messages_dict[i] = messages
         
         # Create async task
         task = asyncio.create_task(bounded_request(i, messages))
@@ -193,6 +191,8 @@ async def batch_judge(
             "prediction": prediction,
             "winner": row["winner"],
             "language": row.get("language", ""),
+            "messages": messages_dict[i],
+            "response": response,
         }
     
     return [r for r in results if r is not None]

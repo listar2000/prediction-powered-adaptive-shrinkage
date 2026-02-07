@@ -7,6 +7,9 @@ pair of LLMs and the number of times they were matched against each other.
 
 Only comparisons with clear winners (model_a or model_b) are included.
 LLM pairs are alphabetically ordered (smaller name first).
+
+Example usage:
+python data/lmarena/summarize_dataset.py --output data/lmarena/sample_data/llm_pair_summary_all_languages.csv --min-comparisons 50
 """
 
 import argparse
