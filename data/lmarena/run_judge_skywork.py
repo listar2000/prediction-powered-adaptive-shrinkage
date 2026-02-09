@@ -32,7 +32,7 @@ import re
 import httpx
 import pandas as pd
 from datasets import load_dataset
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, PreTrainedTokenizer
 from tqdm.asyncio import tqdm
 
 import dotenv
@@ -50,7 +50,7 @@ DEFAULT_MODEL = "Skywork/Skywork-Reward-V2-Llama-3.1-8B"
 def load_lmarena_dataset() -> pd.DataFrame:
     """Load the full LMArena dataset from HuggingFace."""
     ds = load_dataset("lmarena-ai/arena-human-preference-140k", split="train")
-    return ds.to_pandas()
+    return ds.to_pandas() # type: ignore
 
 
 def _is_single_turn(conv: list[dict]) -> bool:
@@ -134,7 +134,7 @@ def extract_conversation_content(row: pd.Series) -> tuple[str, str, str] | None:
 
 
 def format_reward_text(
-    tokenizer: AutoTokenizer,
+    tokenizer: PreTrainedTokenizer,
     user_prompt: str,
     response: str,
 ) -> str:
@@ -147,7 +147,7 @@ def format_reward_text(
         {"role": "user", "content": user_prompt},
         {"role": "assistant", "content": response},
     ]
-    text = tokenizer.apply_chat_template(conv, tokenize=False)
+    text: str = tokenizer.apply_chat_template(conv, tokenize=False) # type: ignore
     if tokenizer.bos_token and text.startswith(tokenizer.bos_token):
         text = text[len(tokenizer.bos_token) :]
     return text
@@ -185,7 +185,7 @@ async def judge_pair(
     client: httpx.AsyncClient,
     classify_url: str,
     model_name: str,
-    tokenizer: AutoTokenizer,
+    tokenizer: PreTrainedTokenizer,
     df_pair: pd.DataFrame,
     semaphore: asyncio.Semaphore,
     pair_label: str,
@@ -208,9 +208,6 @@ async def judge_pair(
                 "score_a": None,
                 "score_b": None,
                 "language": row.get("language", ""),
-                "user_prompt": "",
-                "response_a": "",
-                "response_b": "",
             }
             continue
 
@@ -223,13 +220,10 @@ async def judge_pair(
                 client, classify_url, model_name, text_a, text_b, idx, semaphore
             )
         )
-        tasks.append((idx, row, user_prompt, response_a, response_b, task))
-
-    if skipped > 0:
-        print(f"  Skipped {skipped} rows due to parsing errors")
+        tasks.append((idx, row, task))
 
     # Await all tasks with progress bar
-    for idx, row, user_prompt, response_a, response_b, task in tqdm(
+    for idx, row, task in tqdm(
         tasks, desc=f"  Judging {pair_label}"
     ):
         task_idx, score_a, score_b = await task
@@ -238,6 +232,7 @@ async def judge_pair(
             prediction = "model_a" if score_a >= score_b else "model_b"
         else:
             prediction = "score_error"
+            skipped += 1
 
         results[task_idx] = {
             "id": row["id"],
@@ -248,10 +243,10 @@ async def judge_pair(
             "score_a": score_a,
             "score_b": score_b,
             "language": row.get("language", ""),
-            "user_prompt": user_prompt,
-            "response_a": response_a,
-            "response_b": response_b,
         }
+
+    if skipped > 0:
+        print(f"Skipped {skipped} rows (out of {len(df_pair)}) due to either parsing errors or inference/score errors")
 
     return [r for r in results if r is not None]
 
@@ -267,10 +262,11 @@ def sanitize_filename(name: str) -> str:
 
 def print_pair_summary(results_df: pd.DataFrame) -> None:
     """Print accuracy stats for a single pair."""
-    valid = results_df[results_df["prediction"].isin(["model_a", "model_b"])]
-    if len(valid) > 0:
-        acc = (valid["prediction"] == valid["winner"]).mean()
-        print(f"  Accuracy: {acc:.1%} ({len(valid)} valid predictions)")
+    if len(results_df) > 0:
+        acc = (results_df["prediction"] == results_df["winner"]).mean()
+        print(f"  Accuracy: {acc:.1%} ({len(results_df)} valid predictions)")
+    else:
+        print("No valid predictions found")
 
 
 async def run_pipeline(args) -> None:
@@ -347,9 +343,10 @@ async def run_pipeline(args) -> None:
                 "id", "model_a", "model_b", "winner",
                 "prediction", "score_a", "score_b",
             ]
-            all_summary_rows.append(results_df[summary_cols])
 
-            print_pair_summary(results_df)
+            clean_results_df = results_df[results_df["prediction"].isin(["model_a", "model_b"])]
+            all_summary_rows.append(clean_results_df[summary_cols])
+            print_pair_summary(clean_results_df)
 
     # ---- Save overall summary ----
     if all_summary_rows:
@@ -363,10 +360,11 @@ async def run_pipeline(args) -> None:
         print(f"Pairs processed : {len(all_summary_rows)}")
         print(f"Total comparisons: {len(summary_df)}")
 
-        valid = summary_df[summary_df["prediction"].isin(["model_a", "model_b"])]
-        if len(valid) > 0:
-            acc = (valid["prediction"] == valid["winner"]).mean()
-            print(f"Overall accuracy : {acc:.1%} ({len(valid)} valid)")
+        if len(summary_df) > 0:
+            acc = (summary_df["prediction"] == summary_df["winner"]).mean()
+            print(f"Overall accuracy : {acc:.1%} ({len(summary_df)} valid)")
+        else:
+            print("No valid predictions found")
 
         print(f"\nSaved summary to {summary_path}")
         print(f"Saved per-pair results to {pairs_dir}/")
@@ -377,6 +375,14 @@ async def run_pipeline(args) -> None:
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
+
+"""Example usage:
+python data/lmarena/run_judge_skywork.py \
+--pairs-csv data/lmarena/sample_data/llm_pair_summary_single_turn.csv \
+--output-dir data/lmarena/results_skywork \
+--single-turn-only \
+--max-concurrent 128 \
+"""
 
 def main():
     parser = argparse.ArgumentParser(

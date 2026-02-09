@@ -86,3 +86,4 @@ __pycache__/
 # Scripts and artifacts
 **/results/**
 scripts/*
+data/lmarena/results_skywork/

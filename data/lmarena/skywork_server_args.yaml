@@ -1,5 +1,5 @@
 # SGLang server configuration for Skywork Reward Model
-# Start with: python -m sglang.launch_server --config-file data/lmarena/skywork_server_args.yaml
+# Start with: python -m sglang.launch_server --config data/lmarena/skywork_server_args.yaml
 
 model-path: Skywork/Skywork-Reward-V2-Llama-3.1-8B
 host: 0.0.0.0
