@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 from config import DATA_PATHS
-from typing import Tuple, List
+from typing import Tuple, List, Optional
 
 # Get data paths from config
 GALAXY_ZOO_FILE_PATH = DATA_PATHS["galaxy"]["predictions"]
@@ -89,10 +89,10 @@ class GalaxyZooDataset(PasDataset):
 
         return pred_labelled, y_labelled, pred_unlabelled, y_unlabelled, np.array(true_theta)
 
-    def reload_data(self, train_test_split: float = 0.2, split_seed: int = 42) -> None:
+    def reload_data(self, train_test_split: Optional[float] = None, split_seed: Optional[int] = None) -> None:
         """ Reload the dataset with new split parameters.
         """
         pred_labelled, y_labelled, pred_unlabelled, y_unlabelled, true_theta = self.load_data(
-            train_test_split, split_seed)
+            train_test_split or self.train_test_split, split_seed or self.split_seed)
         self.set_metadata(pred_labelled, y_labelled,
                           pred_unlabelled, y_unlabelled, true_theta)

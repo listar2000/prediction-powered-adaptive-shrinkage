@@ -8,7 +8,6 @@ from tqdm import tqdm
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-import seaborn as sns
 from pathlib import Path
 from typing import Optional
 import json
@@ -68,9 +67,9 @@ def run_benchmark(dataset: PasDataset,
             mse_results.loc[i, estimator_name + "_frac"] = frac
 
     summary_text = [f"\nResults for {dataset.dataset_name}:\n",
-                    f"Mean of metrics:\n {mse_results.mean().to_string(float_format='{:.8f}'.format)}",
-                    f"SD of metrics:\n {mse_results.std().to_string(float_format='{:.8f}'.format)}",
-                    f"SE of mean metrics:\n {mse_results.sem().to_string(float_format='{:.8f}'.format)}"]
+                    f"Mean of metrics:\n{mse_results.mean().to_string(float_format='{:.8f}'.format)}",
+                    f"SD of metrics:\n{mse_results.std().to_string(float_format='{:.8f}'.format)}",
+                    f"SE of mean metrics:\n{mse_results.sem().to_string(float_format='{:.8f}'.format)}"]
 
     if summary:
         print("\n".join(summary_text))
@@ -220,6 +219,8 @@ def visualize_benchmark(mse_results: pd.DataFrame,
         dataset_name: Name of dataset for plot title
         output_path: Path to save plot. If None, plot is displayed but not saved
     """
+    import seaborn as sns
+    
     plt.figure(figsize=(10, 6))
     sns.boxplot(data=mse_results, orient="v")
     plt.xlabel("MSE")
