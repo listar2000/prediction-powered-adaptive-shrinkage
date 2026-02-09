@@ -87,3 +87,4 @@ __pycache__/
 **/results/**
 scripts/*
 data/lmarena/results_skywork/
+tmp/
