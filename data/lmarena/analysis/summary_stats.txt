@@ -1,0 +1,39 @@
+    ====================================================================
+    Predictor Sensitivity & Specificity Analysis — LMArena Clean Summary
+    ====================================================================
+    Dataset : clean_summary.csv
+    Rows    : 40,663
+    Groups  : 298
+    Group sizes : min=100, median=128, max=276
+
+    ── Micro-averaged (pooled across all rows) ────────────────────────
+      Sensitivity : 0.5329
+      Specificity : 0.6878
+      Accuracy    : 0.6183
+
+    ── Macro-averaged (mean across groups) ────────────────────────────
+      Sensitivity : 0.4862  (std=0.1924)
+      Specificity : 0.6394  (std=0.2015)
+      Accuracy    : 0.6174  (std=0.0796)
+
+    ── Confusion matrix (pooled) ──────────────────────────────────────
+      TP =  9,721    FN =  8,522
+      FP =  7,000    TN = 15,420
+
+    ── Per-group distribution quantiles ───────────────────────────────
+    Sensitivity: count    298.000000
+mean       0.486213
+std        0.192437
+min        0.033333
+25%        0.340909
+50%        0.461372
+75%        0.635755
+max        0.898438
+    Specificity: count    298.000000
+mean       0.639401
+std        0.201470
+min        0.136364
+25%        0.473684
+50%        0.647854
+75%        0.816092
+max        0.977273
