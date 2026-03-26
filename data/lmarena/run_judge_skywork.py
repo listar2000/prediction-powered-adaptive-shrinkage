@@ -15,7 +15,7 @@ Outputs:
 
 Usage:
     1. Start the SGLang server:
-       python -m sglang.launch_server --config-file data/lmarena/skywork_server_args.yaml
+       python -m sglang.launch_server --config data/lmarena/skywork_server_args.yaml
 
     2. Run this script:
        python data/lmarena/run_judge_skywork.py \\
@@ -26,6 +26,7 @@ Usage:
 
 import argparse
 import asyncio
+import math
 import os
 import re
 
@@ -42,6 +43,15 @@ dotenv.load_dotenv()
 
 DEFAULT_PORT = 30000
 DEFAULT_MODEL = "Skywork/Skywork-Reward-V2-Llama-3.1-8B"
+
+
+def stable_sigmoid(x: float) -> float:
+    """Numerically stable sigmoid: 1 / (1 + exp(-x))."""
+    if x >= 0:
+        return 1.0 / (1.0 + math.exp(-x))
+    else:
+        ex = math.exp(x)
+        return ex / (1.0 + ex)
 
 
 # ---------------------------------------------------------------------------
@@ -189,6 +199,8 @@ async def judge_pair(
     df_pair: pd.DataFrame,
     semaphore: asyncio.Semaphore,
     pair_label: str,
+    prediction_mode: str = "binary",
+    temperature: float = 1.0,
 ) -> list[dict]:
     """Judge all comparisons for a single LLM pair and return result dicts."""
     results: list[dict | None] = [None] * len(df_pair)
@@ -229,9 +241,12 @@ async def judge_pair(
         task_idx, score_a, score_b = await task
 
         if score_a is not None and score_b is not None:
-            prediction = "model_a" if score_a >= score_b else "model_b"
+            if prediction_mode == "bradley-terry":
+                prediction = stable_sigmoid((score_a - score_b) / temperature)
+            else:
+                prediction = "model_a" if score_a >= score_b else "model_b"
         else:
-            prediction = "score_error"
+            prediction = "score_error" if prediction_mode == "binary" else None
             skipped += 1
 
         results[task_idx] = {
@@ -262,11 +277,19 @@ def sanitize_filename(name: str) -> str:
 
 def print_pair_summary(results_df: pd.DataFrame) -> None:
     """Print accuracy stats for a single pair."""
-    if len(results_df) > 0:
-        acc = (results_df["prediction"] == results_df["winner"]).mean()
-        print(f"  Accuracy: {acc:.1%} ({len(results_df)} valid predictions)")
-    else:
+    if len(results_df) == 0:
         print("No valid predictions found")
+        return
+
+    pred = results_df["prediction"]
+    if pred.dtype == object:
+        # Binary mode: direct string comparison
+        acc = (pred == results_df["winner"]).mean()
+    else:
+        # BT mode: threshold at 0.5 for accuracy
+        pred_label = pred.apply(lambda p: "model_a" if p >= 0.5 else "model_b")
+        acc = (pred_label == results_df["winner"]).mean()
+    print(f"  Accuracy: {acc:.1%} ({len(results_df)} valid predictions)")
 
 
 async def run_pipeline(args) -> None:
@@ -328,6 +351,8 @@ async def run_pipeline(args) -> None:
                 df_pair,
                 semaphore,
                 pair_label,
+                prediction_mode=args.prediction_mode,
+                temperature=args.temperature,
             )
 
             results_df = pd.DataFrame(results)
@@ -344,7 +369,10 @@ async def run_pipeline(args) -> None:
                 "prediction", "score_a", "score_b",
             ]
 
-            clean_results_df = results_df[results_df["prediction"].isin(["model_a", "model_b"])]
+            if args.prediction_mode == "bradley-terry":
+                clean_results_df = results_df[results_df["prediction"].notna()]
+            else:
+                clean_results_df = results_df[results_df["prediction"].isin(["model_a", "model_b"])]
             all_summary_rows.append(clean_results_df[summary_cols])
             print_pair_summary(clean_results_df)
 
@@ -361,7 +389,12 @@ async def run_pipeline(args) -> None:
         print(f"Total comparisons: {len(summary_df)}")
 
         if len(summary_df) > 0:
-            acc = (summary_df["prediction"] == summary_df["winner"]).mean()
+            pred = summary_df["prediction"]
+            if pred.dtype == object:
+                acc = (pred == summary_df["winner"]).mean()
+            else:
+                pred_label = pred.apply(lambda p: "model_a" if p >= 0.5 else "model_b")
+                acc = (pred_label == summary_df["winner"]).mean()
             print(f"Overall accuracy : {acc:.1%} ({len(summary_df)} valid)")
         else:
             print("No valid predictions found")
@@ -422,6 +455,19 @@ def main():
         type=str,
         default=DEFAULT_MODEL,
         help="Model name for the Skywork reward model",
+    )
+    parser.add_argument(
+        "--prediction-mode",
+        type=str,
+        choices=["binary", "bradley-terry"],
+        default="binary",
+        help="Prediction mode: 'binary' (argmax) or 'bradley-terry' (continuous [0,1] via sigmoid)",
+    )
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=1.0,
+        help="Temperature for Bradley-Terry mode: pred = sigmoid((score_a - score_b) / temperature)",
     )
     parser.add_argument(
         "--max-concurrent",

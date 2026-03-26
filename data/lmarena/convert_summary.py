@@ -31,7 +31,16 @@ def convert_summary(input_path: Path, output_path: Path) -> pd.DataFrame:
     ordered_b = model_b.where(~swapped, model_a)
 
     winner = _binarize_outcome(df["winner"], swapped)
-    prediction = _binarize_outcome(df["prediction"], swapped)
+
+    # Auto-detect prediction mode: numeric values indicate Bradley-Terry mode
+    pred_numeric = pd.to_numeric(df["prediction"], errors="coerce")
+    if pred_numeric.notna().all():
+        # Bradley-Terry: continuous predictions in [0, 1]
+        prediction = pred_numeric.astype(float)
+        prediction = prediction.where(~swapped, 1.0 - prediction)
+    else:
+        # Binary: string labels "model_a" / "model_b"
+        prediction = _binarize_outcome(df["prediction"], swapped)
 
     pair_keys = pd.MultiIndex.from_arrays([ordered_a, ordered_b])
     group_id = pd.factorize(pair_keys, sort=False)[0]
