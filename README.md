@@ -33,6 +33,9 @@ You should then see a progress bar as we simulate many repeated runs. After that
     - `simple_estimators.py`: Basic statistical estimators
     - `uni_pas_estimators.py`: Univariate PAS estimators
     - `legacy_estimators.py`: Legacy estimators (do not use)
+  - `intervals/`: Directory containing confidence interval implementations
+    - `simple_cis.py`: Classical CLT-based confidence intervals
+    - `ppi_cis.py`: PPI and power-tuned PPI confidence intervals
   - `experiments.py`: Experiment configurations and setup
   - `utils.py`: Utility functions
   - `run_timing_benchmark.py`: Timing benchmark script
@@ -45,6 +48,7 @@ You should then see a progress bar as we simulate many repeated runs. After that
     - `run_amazon_review.py`: Amazon Review dataset experiments
     - `run_galaxy_zoo.py`: Galaxy Zoo dataset experiments
     - `run_synthetic.py`: Synthetic dataset experiments
+    - `run_synthetic_ci.py`: Synthetic dataset CI experiments
 - `data/`: Directory for storing datasets
 - `requirements.txt`: Python package dependencies
 
@@ -143,14 +147,54 @@ Here, the arguments are:
 
 You can also use the `run_benchmark_timing` function to time the execution of each estimator.
 
+## Confidence Intervals
+
+In addition to point estimators, _PAS_ also provides **confidence interval (CI)** methods for mean estimation. These live in `src/intervals/` and follow the same functional interface:
+
+```python
+def ci_method(dataset: PasDataset, alpha: float = 0.1, **kwargs) -> np.ndarray:
+    pass
+```
+
+Each CI method takes a `PasDataset` and returns an `(M, 2)` numpy array, where each row contains `[lower, upper]` bounds for one problem. The available methods are:
+
+- `src/intervals/simple_cis.py`: Classical CLT-based CI (`get_mle_cis`)
+- `src/intervals/ppi_cis.py`: Vanilla PPI CI (`get_vanilla_ppi_cis`) and power-tuned PPI CI (`get_pt_ppi_cis`) [[Angelopoulos et al. 2024]](https://arxiv.org/abs/2311.01453)
+
+#### Benchmarking CIs
+
+Use `run_ci_benchmark` in `src/experiments.py` to compare CI methods across repeated trials, measuring **coverage rate** and **average CI width**:
+
+```python
+from experiments import run_ci_benchmark
+from datasets.synthetic_model import GaussianSyntheticDataset
+from intervals import CORE_CI_METHODS
+
+dataset = GaussianSyntheticDataset(good_f=True, M=100, split_seed=4321)
+
+run_ci_benchmark(dataset,
+                 trials=200,
+                 alpha=0.1,
+                 summary=True,
+                 ci_methods=CORE_CI_METHODS,
+                 ci_kwargs={"pt_ci": {"share_var": False}})
+```
+
+Or simply run the demo script:
+```bash
+cd src && python scripts/run_synthetic_ci.py
+```
+
 ## Change Log:
 
+- 2026-03-27: Add confidence interval module (`src/intervals/`) with classical, vanilla PPI, and power-tuned PPI CIs. Add `run_ci_benchmark` for evaluating coverage and width.
 - 2025-11-07: We fix an issue with the synthetic dataset (where we can obtain closed-form expressions for the second-moments) that previously omitted the division by the number of labelled data points (i.e. $n_j$).
 
 
 ## Roadmap:
 
 - [x] Clean up and reorg the codebase, rewrite `README.md`.
+- [x] Add confidence interval methods and CI benchmarking.
 - [ ] Add estimators from the [Regression for the mean [Erye & Madras 2025]](https://arxiv.org/abs/1207.0023) paper.
 - [ ] Add `LLM-as-a-judge` dataset and notebooks.
 - [ ] Refactor some estimator design to reuse shared code chunks.

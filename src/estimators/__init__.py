@@ -1,4 +1,3 @@
-from hmac import compare_digest
 from estimators.simple_estimators import get_mle_estimators, get_pred_mean_estimators
 from estimators.ppi_estimators import get_vanilla_ppi_estimators, get_pt_ppi_estimators
 from estimators.pas_estimators import get_shrinkage_only_estimators, get_pas_estimators, get_shrinkage_to_mean_estimators
