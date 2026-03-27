@@ -2,6 +2,7 @@
 Utility functions for calculating SURE, etc.
 """
 from scipy.optimize import minimize_scalar
+from scipy.stats import norm
 import numpy as np
 from typing import NamedTuple, Tuple, List
 import inspect
@@ -29,6 +30,60 @@ def get_decrease_fraction(y_true: np.ndarray, esimates: np.ndarray, mle: np.ndar
     # calculate number of points where (y_true - mle) ** 2 > (y_true - esimates) ** 2
     idx = (y_true - mle) ** 2 > (y_true - esimates) ** 2
     return np.mean(idx)
+
+
+# CI-related utilities
+
+def _zconfint(mean: np.ndarray, se: np.ndarray, alpha: float = 0.1,
+              alternative: str = "two-sided") -> np.ndarray:
+    """Construct z-based confidence intervals.
+
+    Args:
+        mean: Point estimates, shape (M,).
+        se: Standard errors, shape (M,).
+        alpha: Error level; targets 1-alpha coverage.
+        alternative: "two-sided", "larger", or "smaller".
+
+    Returns:
+        np.ndarray of shape (M, 2) with columns [lower, upper].
+    """
+    M = mean.shape[0]
+    ci = np.empty((M, 2))
+    if alternative == "two-sided":
+        z = norm.ppf(1 - alpha / 2)
+        ci[:, 0] = mean - z * se
+        ci[:, 1] = mean + z * se
+    elif alternative == "larger":
+        z = norm.ppf(1 - alpha)
+        ci[:, 0] = mean - z * se
+        ci[:, 1] = np.inf
+    elif alternative == "smaller":
+        z = norm.ppf(1 - alpha)
+        ci[:, 0] = -np.inf
+        ci[:, 1] = mean + z * se
+    else:
+        raise ValueError(f"alternative must be 'two-sided', 'larger', or 'smaller', got '{alternative}'")
+    return ci
+
+
+def get_coverage(true_theta: np.ndarray, ci: np.ndarray) -> float:
+    """Fraction of problems where true_theta falls within the CI.
+
+    Args:
+        true_theta: Ground truth, shape (M,).
+        ci: Confidence intervals, shape (M, 2) with [lower, upper].
+    """
+    covered = (true_theta >= ci[:, 0]) & (true_theta <= ci[:, 1])
+    return np.mean(covered)
+
+
+def get_avg_ci_width(ci: np.ndarray) -> float:
+    """Average CI width across M problems.
+
+    Args:
+        ci: Confidence intervals, shape (M, 2) with [lower, upper].
+    """
+    return np.mean(ci[:, 1] - ci[:, 0])
 
 
 # get function default arguments

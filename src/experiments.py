@@ -3,7 +3,7 @@ Common experiment utilities for running benchmarks and visualizations across dif
 """
 from datasets.dataset import PasDataset
 from estimators import CORE_ESTIMATORS
-from utils import get_mse, get_default_args, get_decrease_fraction
+from utils import get_mse, get_default_args, get_decrease_fraction, get_coverage, get_avg_ci_width
 from tqdm import tqdm
 import pandas as pd
 import numpy as np
@@ -207,6 +207,82 @@ def run_benchmark_timing(dataset: PasDataset,
             f.write("\n".join(summary_text))
 
     return timing_results
+
+
+def run_ci_benchmark(dataset: PasDataset,
+                     trials: int = 100,
+                     alpha: float = 0.1,
+                     summary: bool = True,
+                     save_results: bool = False,
+                     ci_methods: Optional[dict] = None,
+                     ci_kwargs: Optional[dict] = None) -> pd.DataFrame:
+    """Run benchmark experiments for confidence interval methods on any dataset.
+
+    Args:
+        dataset: Dataset to run experiments on
+        trials: Number of trials to run
+        alpha: Error level; CIs target 1-alpha coverage
+        summary: Whether to print summary statistics
+        save_results: Whether to save results to disk
+        ci_methods: Dictionary of CI methods to use. If None, uses CORE_CI_METHODS
+        ci_kwargs: Dictionary of keyword arguments to pass to each CI method.
+            Each key is a CI method name, and the value is a dictionary of arguments.
+
+    Returns:
+        DataFrame containing coverage and width results for each CI method across trials
+    """
+    from intervals import CORE_CI_METHODS
+    ci_methods = ci_methods or CORE_CI_METHODS
+    col_names = []
+    for name in ci_methods:
+        col_names.extend([f"{name}_coverage", f"{name}_width"])
+
+    ci_results = pd.DataFrame(columns=col_names)
+    base_seed = dataset.split_seed
+
+    for i in tqdm(range(trials)):
+        dataset.reload_data(split_seed=i + base_seed)
+        true_theta = dataset.true_theta
+
+        for ci_name, ci_func in ci_methods.items():
+            kwargs = ci_kwargs.get(ci_name, {}) if ci_kwargs else {}
+            ci = ci_func(dataset, alpha=alpha, **kwargs)  # shape (M, 2)
+            coverage = get_coverage(true_theta, ci)
+            width = get_avg_ci_width(ci)
+            ci_results.loc[i, f"{ci_name}_coverage"] = coverage
+            ci_results.loc[i, f"{ci_name}_width"] = width
+
+    summary_text = [
+        f"\nCI Results for {dataset.dataset_name} (alpha={alpha}):\n",
+        f"Mean of metrics:\n {ci_results.mean().to_string(float_format='{:.8f}'.format)}",
+        f"SD of metrics:\n {ci_results.std().to_string(float_format='{:.8f}'.format)}",
+        f"SE of mean metrics:\n {ci_results.sem().to_string(float_format='{:.8f}'.format)}",
+    ]
+
+    if summary:
+        print("\n".join(summary_text))
+
+    if save_results:
+        timestamp = pd.Timestamp.now().strftime("%Y%m%d_%H%M")
+        save_dir = BENCHMARK_FOLDER / f"{dataset.dataset_name}_ci_{timestamp}"
+        save_dir.mkdir(parents=True, exist_ok=True)
+
+        ci_results.to_csv(save_dir / "ci_results.csv")
+
+        ci_args = {}
+        for name, func in ci_methods.items():
+            default_args = get_default_args(func)
+            if ci_kwargs and name in ci_kwargs:
+                default_args.update(ci_kwargs[name])
+            ci_args[name] = default_args
+
+        with open(save_dir / "ci_args.json", 'w') as f:
+            json.dump(ci_args, f, indent=2)
+
+        with open(save_dir / "summary.txt", 'w') as f:
+            f.write("\n".join(summary_text))
+
+    return ci_results
 
 
 def visualize_benchmark(mse_results: pd.DataFrame,
