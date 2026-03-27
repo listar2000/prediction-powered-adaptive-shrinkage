@@ -1,9 +1,8 @@
 from datasets.dataset import PasDataset
 import numpy as np
 from pathlib import Path
-import h5py
 from config import DATA_PATHS
-from typing import Tuple, List
+from typing import Tuple, List, Optional
 
 # Get data paths from config
 AMAZON_FOOD_REVIEW_TUNED = Path(DATA_PATHS["amazon"]["tuned"])
@@ -36,6 +35,8 @@ class AmazonReviewDataset(PasDataset):
     def _read_raw_data(self) -> None:
         """ Read the raw data from the file.
         """
+        import h5py
+
         assert self.file_path.exists(), f"File not found: {self.file_path}"
         assert self.file_path.suffix == ".h5", f"Invalid file format: {self.file_path.suffix}. Should be .h5"
 
@@ -76,11 +77,11 @@ class AmazonReviewDataset(PasDataset):
 
         return pred_labelled, y_labelled, pred_unlabelled, y_unlabelled, np.array(true_theta)
 
-    def reload_data(self, train_test_split: float = 0.2, split_seed: int = 42) -> None:
+    def reload_data(self, train_test_split: Optional[float] = None, split_seed: Optional[int] = None) -> None:
         """ Reload the dataset with new split parameters.
         """
         pred_labelled, y_labelled, pred_unlabelled, y_unlabelled, true_theta = self.load_data(
-            train_test_split, split_seed)
+            train_test_split or self.train_test_split, split_seed or self.split_seed)
 
         self.validate_data(pred_labelled, y_labelled,
                            pred_unlabelled, y_unlabelled)
