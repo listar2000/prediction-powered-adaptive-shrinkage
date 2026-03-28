@@ -2,7 +2,7 @@
 PPI estimators
 """
 import numpy as np
-from datasets.dataset import PasDataset
+from pas.datasets.dataset import PasDataset
 from typing import Union, Tuple
 
 

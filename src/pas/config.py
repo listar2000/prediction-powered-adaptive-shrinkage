@@ -1,8 +1,24 @@
-from experiments import run_benchmark, run_benchmark_timing
-from datasets.amazon_review import AmazonReviewDataset
 from pathlib import Path
 
-kwargs = {
+# Project root directory
+PROJECT_ROOT = Path(__file__).parent.parent.parent
+
+# Data paths
+DATA_PATHS = {
+    "amazon": {
+        "tuned": PROJECT_ROOT / "data/amazon/amazon_review.h5",
+        "raw": PROJECT_ROOT / "data/amazon/amazon_review_raw.h5"
+    },
+    "galaxy": {
+        "predictions": PROJECT_ROOT / "data/galaxy/galaxy_test_prediction.csv"
+    },
+    "lmarena": {
+        "cleaned": PROJECT_ROOT / "data/lmarena/clean_data/clean_summary.csv"
+    }
+}
+
+# Default kwargs for different experiments
+DEFAULT_KWARGS = {
     "pt": {
         "share_var": False,
         "get_lambdas": False
@@ -31,14 +47,3 @@ kwargs = {
         "get_lambda": False
     }
 }
-
-if __name__ == "__main__":
-    dataset = AmazonReviewDataset(good_review=True)
-
-    # mse_results = run_benchmark(
-    #     dataset, trials=200, summary=True, estimator_kwargs=kwargs)
-    # visualize_benchmark(
-    #     mse_results, dataset_name="Amazon Review", output_path=output_dir / "benchmark_amazon_bad_with_k_fold.png")
-
-    timing_results = run_benchmark_timing(
-        dataset, summary=True, save_results=True, estimator_kwargs=kwargs)

@@ -2,8 +2,8 @@
 Classical confidence intervals for the mean.
 """
 import numpy as np
-from datasets.dataset import PasDataset
-from utils import _zconfint
+from pas.datasets.dataset import PasDataset
+from pas.utils import _zconfint
 
 
 def get_mle_cis(data: PasDataset, alpha: float = 0.1,
@@ -23,6 +23,27 @@ def get_mle_cis(data: PasDataset, alpha: float = 0.1,
     means = np.array([y.mean() for y in data.y_labelled])
     ses = np.array([y.std(ddof=1) / np.sqrt(n)
                     for y, n in zip(data.y_labelled, data.ns)])
+    return _zconfint(means, ses, alpha, alternative)
+
+
+def get_pred_mean_cis(data: PasDataset, alpha: float = 0.1,
+                      alternative: str = "two-sided") -> np.ndarray:
+    """Prediction-based CLT confidence interval for each problem's mean.
+
+    Uses only the unlabelled predictions as if they were the true labels:
+    CI = pred_unlabelled_i.mean() +/- z * pred_unlabelled_i.std(ddof=1) / sqrt(N_i)
+
+    Args:
+        data: Dataset with M problems.
+        alpha: Error level; targets 1-alpha coverage. Default 0.1 (90% CI).
+        alternative: "two-sided", "larger", or "smaller".
+
+    Returns:
+        np.ndarray of shape (M, 2) with columns [lower, upper].
+    """
+    means = np.array([pred.mean() for pred in data.pred_unlabelled])
+    ses = np.array([pred.std(ddof=1) / np.sqrt(N)
+                    for pred, N in zip(data.pred_unlabelled, data.Ns)])
     return _zconfint(means, ses, alpha, alternative)
 
 

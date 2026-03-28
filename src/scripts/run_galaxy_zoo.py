@@ -1,9 +1,9 @@
 """
 Experiment with Galaxy Zoo dataset
 """
-from datasets.galaxy_zoo import GalaxyZooDataset
-from experiments import run_benchmark
-from config import DEFAULT_KWARGS
+from pas.datasets.galaxy_zoo import GalaxyZooDataset
+from pas.experiments import run_benchmark
+from pas.config import DEFAULT_KWARGS
 
 if __name__ == "__main__":
     dataset = GalaxyZooDataset()

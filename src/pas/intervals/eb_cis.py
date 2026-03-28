@@ -2,13 +2,13 @@
 Empirical Bayes (EB) adjusted PPI confidence intervals for the mean.
 """
 import numpy as np
-from datasets.dataset import PasDataset
-from estimators.eb_estimators import (
+from pas.datasets.dataset import PasDataset
+from pas.estimators.eb_estimators import (
     _get_generic_ppi_estimators_plus_bias,
     _get_global_ppi_lambda,
     _param_prior_computation_for_bias,
 )
-from utils import _zconfint
+from pas.utils import _zconfint
 
 
 def _eb_ppi_ci_from_components(ppi, bias, cov_matrix, corr_threshold,

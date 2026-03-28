@@ -2,9 +2,9 @@
 UniPAS estimators
 """
 import numpy as np
-from datasets.dataset import PasDataset
-from estimators.ppi_estimators import _get_generic_ppi_estimators
-from utils import _minimize_lbfgs
+from pas.datasets.dataset import PasDataset
+from pas.estimators.ppi_estimators import _get_generic_ppi_estimators
+from pas.utils import _minimize_lbfgs
 
 
 def get_uni_pt_estimators(data: PasDataset, get_lambda: bool = False):

@@ -2,7 +2,7 @@
 Empirical Bayes (EB) adjusted PPI estimators for compound mean estimation.
 """
 import numpy as np
-from datasets.dataset import PasDataset
+from pas.datasets.dataset import PasDataset
 from typing import Tuple
 from scipy.optimize import minimize
 

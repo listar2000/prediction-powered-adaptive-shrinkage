@@ -1,10 +1,10 @@
 """
 Experiment with LMArena dataset
 """
-from datasets.lmarena import LMArenaDataset
-from experiments import run_benchmark
-from estimators import ALL_ESTIMATORS
-from config import DEFAULT_KWARGS
+from pas.datasets.lmarena import LMArenaDataset
+from pas.experiments import run_benchmark
+from pas.estimators import ALL_ESTIMATORS
+from pas.config import DEFAULT_KWARGS
 
 if __name__ == "__main__":
     dataset = LMArenaDataset(train_test_split=0.4)

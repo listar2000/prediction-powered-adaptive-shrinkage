@@ -1,6 +1,6 @@
-from datasets.dataset import PasDataset
+from pas.datasets.dataset import PasDataset
 from pathlib import Path
-from config import DATA_PATHS
+from pas.config import DATA_PATHS
 from typing import Tuple, List, Optional
 
 import pandas as pd

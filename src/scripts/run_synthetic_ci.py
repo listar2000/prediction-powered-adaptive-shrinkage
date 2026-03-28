@@ -1,5 +1,5 @@
-from datasets.synthetic_model import GaussianSyntheticDataset
-from experiments import run_ci_benchmark
+from pas.datasets.synthetic_model import GaussianSyntheticDataset
+from pas.experiments import run_ci_benchmark
 
 if __name__ == "__main__":
     kwargs = {

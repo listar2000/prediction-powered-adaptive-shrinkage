@@ -1,4 +1,4 @@
-from datasets.dataset import PasDataset
+from pas.datasets.dataset import PasDataset
 import numpy as np
 import numpy.random as npr
 from typing import Tuple, List

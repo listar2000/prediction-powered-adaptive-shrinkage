@@ -1,9 +1,9 @@
 """
 Common experiment utilities for running benchmarks and visualizations across different datasets.
 """
-from datasets.dataset import PasDataset
-from estimators import CORE_ESTIMATORS
-from utils import get_mse, get_default_args, get_decrease_fraction, get_coverage, get_avg_ci_width
+from pas.datasets.dataset import PasDataset
+from pas.estimators import CORE_ESTIMATORS
+from pas.utils import get_mse, get_default_args, get_decrease_fraction, get_coverage, get_avg_ci_width
 from tqdm.auto import tqdm
 import pandas as pd
 import numpy as np
@@ -234,7 +234,7 @@ def run_ci_benchmark(dataset: PasDataset,
     Returns:
         DataFrame containing coverage and width results for each CI method across trials
     """
-    from intervals import CORE_CI_METHODS
+    from pas.intervals import CORE_CI_METHODS
     ci_methods = ci_methods or CORE_CI_METHODS
     col_names = []
     for name in ci_methods:

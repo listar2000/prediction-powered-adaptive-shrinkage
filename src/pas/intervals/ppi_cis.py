@@ -2,9 +2,9 @@
 Prediction-Powered Inference (PPI) confidence intervals for the mean.
 """
 import numpy as np
-from datasets.dataset import PasDataset
-from estimators.ppi_estimators import get_vanilla_ppi_estimators, get_pt_ppi_estimators
-from utils import _zconfint
+from pas.datasets.dataset import PasDataset
+from pas.estimators.ppi_estimators import get_vanilla_ppi_estimators, get_pt_ppi_estimators
+from pas.utils import _zconfint
 
 
 def get_vanilla_ppi_cis(data: PasDataset, alpha: float = 0.1,

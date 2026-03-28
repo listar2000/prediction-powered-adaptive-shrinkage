@@ -1,7 +1,7 @@
-from datasets.dataset import PasDataset
+from pas.datasets.dataset import PasDataset
 import numpy as np
 from pathlib import Path
-from config import DATA_PATHS
+from pas.config import DATA_PATHS
 from typing import Tuple, List, Optional
 
 # Get data paths from config

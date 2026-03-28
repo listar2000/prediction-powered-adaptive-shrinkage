@@ -2,9 +2,10 @@
 All the estimators that are not being used in the current version of the code.
 """
 import numpy as np
-from datasets.dataset import PasDataset
-from estimators.ppi_estimators import _get_generic_ppi_estimators, get_pt_ppi_estimators, get_uni_pt_estimators
-from utils import _minimize_lbfgs
+from pas.datasets.dataset import PasDataset
+from pas.estimators.ppi_estimators import _get_generic_ppi_estimators, get_pt_ppi_estimators
+from pas.estimators.uni_pas_estimators import get_uni_pt_estimators
+from pas.utils import _minimize_lbfgs
 from copy import copy
 
 

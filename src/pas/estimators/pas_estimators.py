@@ -3,9 +3,9 @@ PAS and UniPAS estimators
 """
 import numpy as np
 from typing import Union, Tuple
-from datasets.dataset import PasDataset
-from utils import _minimize_lbfgs
-from estimators.ppi_estimators import get_pt_ppi_estimators
+from pas.datasets.dataset import PasDataset
+from pas.utils import _minimize_lbfgs
+from pas.estimators.ppi_estimators import get_pt_ppi_estimators
 
 
 def get_shrinkage_only_estimators(data: PasDataset, get_lambdas: bool = False, share_var: bool = True, cutoff: float = 0.999) \

@@ -2,7 +2,7 @@
 Trivial estimators
 """
 import numpy as np
-from datasets.dataset import PasDataset
+from pas.datasets.dataset import PasDataset
 
 
 def get_mle_estimators(data: PasDataset) -> np.ndarray:

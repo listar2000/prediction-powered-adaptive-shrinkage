@@ -3,11 +3,11 @@ Galaxy Zoo Dataset for morphology classification
 - Data contains galaxy morphology labels and predictions
 - Labels are binarized: 1 for spiral galaxies (original labels 3,4,5) and 0 otherwise
 """
-from datasets.dataset import PasDataset
+from pas.datasets.dataset import PasDataset
 import numpy as np
 import pandas as pd
 from pathlib import Path
-from config import DATA_PATHS
+from pas.config import DATA_PATHS
 from typing import Tuple, List, Optional
 
 # Get data paths from config
