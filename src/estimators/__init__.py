@@ -2,6 +2,7 @@ from estimators.simple_estimators import get_mle_estimators, get_pred_mean_estim
 from estimators.ppi_estimators import get_vanilla_ppi_estimators, get_pt_ppi_estimators
 from estimators.pas_estimators import get_shrinkage_only_estimators, get_pas_estimators, get_shrinkage_to_mean_estimators
 from estimators.uni_pas_estimators import get_uni_pt_estimators, get_uni_pas_estimators
+from estimators.eb_estimators import get_eb_ppi_estimators, get_eb_unipt_ppi_estimators
 
 __all__ = [
     "get_mle_estimators",
@@ -13,6 +14,8 @@ __all__ = [
     "get_shrinkage_to_mean_estimators",
     "get_uni_pt_estimators",
     "get_uni_pas_estimators",
+    "get_eb_ppi_estimators",
+    "get_eb_unipt_ppi_estimators",
 ]
 
 
@@ -31,4 +34,6 @@ ALL_ESTIMATORS = {
     **CORE_ESTIMATORS,
     "uni_pt": get_uni_pt_estimators,
     "uni_pas": get_uni_pas_estimators,
+    "eb_ppi": get_eb_ppi_estimators,
+    "eb_unipt_ppi": get_eb_unipt_ppi_estimators,
 }

@@ -4,7 +4,7 @@ Common experiment utilities for running benchmarks and visualizations across dif
 from datasets.dataset import PasDataset
 from estimators import CORE_ESTIMATORS
 from utils import get_mse, get_default_args, get_decrease_fraction, get_coverage, get_avg_ci_width
-from tqdm import tqdm
+from tqdm.auto import tqdm
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -21,7 +21,8 @@ def run_benchmark(dataset: PasDataset,
                   summary: bool = True,
                   save_results: bool = False,
                   estimators: Optional[dict] = None,
-                  estimator_kwargs: Optional[dict] = None) -> pd.DataFrame:
+                  estimator_kwargs: Optional[dict] = None,
+                  verbose: bool = True) -> pd.DataFrame:
     """ Run benchmark experiments on any dataset.
 
     Args:
@@ -49,7 +50,7 @@ def run_benchmark(dataset: PasDataset,
         [estimator + "_frac" for estimator in estimators.keys()]
     mse_results = pd.DataFrame(columns=col_names)
     base_seed = dataset.split_seed
-    for i in tqdm(range(trials)):
+    for i in tqdm(range(trials), disable=not verbose):
         # randomize the dataset (train-test split)
         dataset.reload_data(split_seed=i + base_seed)
         true_theta = dataset.true_theta
@@ -105,7 +106,8 @@ def run_benchmark_timing(dataset: PasDataset,
                          summary: bool = True,
                          save_results: bool = True,
                          estimators: Optional[dict] = None,
-                         estimator_kwargs: Optional[dict] = None) -> pd.DataFrame:
+                         estimator_kwargs: Optional[dict] = None,
+                         verbose: bool = True) -> pd.DataFrame:
     """ Run benchmark to measure computational time for each estimator.
 
     This function focuses solely on measuring the execution time of each estimator
@@ -148,7 +150,7 @@ def run_benchmark_timing(dataset: PasDataset,
     # Now run the actual timing batches
     print(
         f"Running {num_batches} timing batches (each with {trials_per_batch} trials)...")
-    for batch in tqdm(range(num_batches)):
+    for batch in tqdm(range(num_batches), disable=not verbose):
         for estimator_name, estimator_func in estimators.items():
             kwargs = estimator_kwargs.get(
                 estimator_name, {}) if estimator_kwargs else {}
@@ -215,7 +217,8 @@ def run_ci_benchmark(dataset: PasDataset,
                      summary: bool = True,
                      save_results: bool = False,
                      ci_methods: Optional[dict] = None,
-                     ci_kwargs: Optional[dict] = None) -> pd.DataFrame:
+                     ci_kwargs: Optional[dict] = None,
+                     verbose: bool = True) -> pd.DataFrame:
     """Run benchmark experiments for confidence interval methods on any dataset.
 
     Args:
@@ -240,7 +243,7 @@ def run_ci_benchmark(dataset: PasDataset,
     ci_results = pd.DataFrame(columns=col_names)
     base_seed = dataset.split_seed
 
-    for i in tqdm(range(trials)):
+    for i in tqdm(range(trials), disable=not verbose):
         dataset.reload_data(split_seed=i + base_seed)
         true_theta = dataset.true_theta
 
@@ -314,7 +317,8 @@ def run_mixed_estimator_experiment(dataset: PasDataset,
                                    estimator2_name: str,
                                    trials: int = 100,
                                    num_weights: int = 50,
-                                   output_path: Optional[Path] = None):
+                                   output_path: Optional[Path] = None,
+                                   verbose: bool = True):
     """ Run experiment mixing two estimators with different weights.
 
     Args:
@@ -324,6 +328,7 @@ def run_mixed_estimator_experiment(dataset: PasDataset,
         trials: Number of trials to run
         num_weights: Number of weight values to try between 0 and 1
         output_path: Path to save plot. If None, plot is displayed but not saved
+        verbose: Whether to show a progress bar
     """
     assert estimator1_name in CORE_ESTIMATORS and estimator2_name in CORE_ESTIMATORS, \
         f"Estimators {estimator1_name} and {estimator2_name} must be in CORE_ESTIMATORS"
@@ -331,7 +336,7 @@ def run_mixed_estimator_experiment(dataset: PasDataset,
     weights = np.linspace(0, 1, num_weights)
     mse_results = np.zeros((trials, num_weights))
 
-    for i in tqdm(range(trials)):
+    for i in tqdm(range(trials), disable=not verbose):
         dataset.reload_data(split_seed=i + 12345)
         true_theta = dataset.true_theta
 
