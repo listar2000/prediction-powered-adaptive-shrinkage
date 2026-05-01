@@ -1,0 +1,188 @@
+---
+title: "GWAS"
+format: html
+---
+
+```{r}
+#| label: load-pkgs
+#| code-summary: "Packages"
+#| message: false
+library(MASS)
+library(ggplot2)
+library(reshape2)
+library(knitr)
+library(progress)
+library(REBayes)
+```
+
+
+```{r}
+source("../../function/function.R")
+```
+# Load data
+```{r}
+sumstats <- read.table("height_chrom1-22.sumstats", header = TRUE, stringsAsFactors = FALSE)
+sumstats_clean <- sumstats[complete.cases(sumstats), ]
+```
+
+```{r}
+hat_beta_g_set <- sumstats_clean$direct_Beta
+hat_delta_g_set <- sumstats_clean$avg_NTC_Beta
+se_beta_set <-  sumstats_clean$direct_SE
+se_delta_set <- sumstats_clean$avg_NTC_SE
+corr_set <- sumstats_clean$r_direct_avg_NTC
+G <- length(hat_beta_g_set)
+```
+
+```{r}
+result <-GNmix_diffvar(hat_delta_g_set,se_delta_set,u = 300)
+value <- as.matrix(result$u)
+probability <- result$fu
+```
+
+```{r}
+parametric_prior <-estimate_parametric_mle(hat_delta_g_set,se_delta_set)
+```
+
+```{r}
+p_set <- numeric(G)
+p_set_abs <- numeric(G)
+p_set_param <- numeric(G)
+p_set_z <- numeric(G)
+for(i in 1:G){
+  p_value <- cal_p_value_npmle_diffvar(value,probability,hat_beta_g_set[i],hat_delta_g_set[i],se_beta_set[i],se_delta_set[i],corr_set[i])
+  p_set[i] <-  p_value
+  
+  p_value_abs <- cal_p_value_npmle_diffvar_abs(value,probability,hat_beta_g_set[i],hat_delta_g_set[i],se_beta_set[i],se_delta_set[i],corr_set[i])
+  p_set_abs[i] <-  p_value_abs
+  
+  p_value_param <- cal_p_value_param_diffvar(parametric_prior$hat_mu_b,parametric_prior$hat_var_b,hat_beta_g_set[i],hat_delta_g_set[i],se_beta_set[i],se_delta_set[i],corr_set[i])
+  p_set_param[i] <-  p_value_param
+  
+  p_value_z <- cal_p_value_z_diffvar(hat_beta_g_set[i],se_beta_set[i])
+  p_set_z[i] <- p_value_z
+}
+```
+
+
+```{r}
+significance <- BH_adjust(p_set,alpha = 0.05)
+significance_abs <- BH_adjust(p_set_abs,alpha = 0.05)
+significance_param <- BH_adjust(p_set_param,alpha = 0.05)
+significance_z <- BH_adjust(p_set_z,alpha = 0.05)
+```
+
+
+```{r}
+print(sum(significance))
+print(sum(significance_abs))
+print(sum(significance_param))
+print(sum(significance_z))
+```
+
+
+```{r}
+p_set_df <- data.frame(p_value = p_set_param)
+plot1 <- ggplot(p_set_df, aes(x = p_value)) +
+  geom_histogram(fill = "skyblue4", alpha = 0.6, breaks = seq(0,1,0.005), color = "black") +
+  labs(title = "Frequency Plot of P-Values",
+       x = "P-Value",
+       y = "Frequency") +
+  theme_minimal()
+print(plot1)
+```
+
+
+
+```{r}
+corr_df <- data.frame(corr = corr_set)
+plot_corr <- ggplot(corr_df, aes(x = corr)) +
+  geom_histogram(fill = "orange", alpha = 0.6, bins =100, color = "black") +
+  labs(title = "Frequency Plot of Correlation",
+       x = "Corr",
+       y = "Frequency") +
+  theme_minimal()
+print(plot_corr)
+```
+
+
+```{r}
+idx <- sample(seq_along(se_delta_set), size = min(10000, length(se_delta_set)))
+
+se_delta_sub <- se_delta_set[idx]
+
+x_vals <- seq(
+  min(hat_delta_g_set, na.rm = TRUE),
+  max(hat_delta_g_set, na.rm = TRUE),
+  length.out = 100
+)
+y_npmle <- sapply(x_vals, average_marginal_delta_npmle, value = value, probability = probability, se_delta_set=se_delta_sub)
+y_param <- sapply(x_vals, average_marginal_delta_parametric, a = parametric_prior$hat_mu_b, b = parametric_prior$hat_var_b, se_delta_set=se_delta_sub)
+df_lines <- rbind(
+  data.frame(x = x_vals, y = y_npmle,  method = "NPMLE"),
+  data.frame(x = x_vals, y = y_param,  method = "Parametric")
+)
+
+p <- ggplot() +
+  # histogram of the observed hat_delta
+  geom_histogram(
+    data = data.frame(delta_g = hat_delta_g_set),
+    aes(x = delta_g, y = after_stat(density), fill = "Histogram"),
+    bins = 20, alpha = 0.3, color = "grey50"
+  ) +
+  # both lines
+  geom_line(
+    data = df_lines,
+    aes(x = x, y = y, color = method),
+    size = 1
+  ) +
+  labs(
+    title = expression(bold("Average Marginal for ") * bold(hat(b)[g])),
+    x = expression(bold(hat(b)[g])),
+    y = "Density"
+  ) +
+  scale_fill_manual(values = c("Histogram" = "gray"), name = NULL) +
+  scale_color_manual(
+    values = c("NPMLE" = "firebrick", "Parametric" = "steelblue"),
+    name = NULL
+  )+
+  theme_minimal() 
+
+print(p)
+```
+```{r}
+mu_param <- parametric_prior$hat_mu_b
+sd_param <- sqrt(parametric_prior$hat_var_b) # Remember to take sqrt of variance
+
+# 2. Prepare the NPMLE data with a Scaling Factor
+# Adjust 'scale_factor' to make the spikes visually comparable to the curve
+# A good starting point is often the inverse of the bin width or 1
+scale_factor <- 1
+df_prior <- data.frame(
+  value = as.numeric(value), 
+  probability = as.numeric(probability) * scale_factor
+)
+
+# 3. Create the Plot
+plot_combined_prior <- ggplot() +
+  # Add the NPMLE Spikes
+  geom_segment(data = df_prior, 
+               aes(x = value, xend = value, y = 0, yend = probability, color = "NPMLE"), 
+               linewidth = 0.8) +
+  # Add the Parametric Normal Curve
+  #stat_function(data = data.frame(x = c(min(df_prior$value), max(df_prior$value) +0.25)),
+  #              aes(x = x, color = "Parametric"),
+  #              fun = dnorm, 
+  #              args = list(mean = mu_param, sd = sd_param),
+  #              linewidth = 1) +
+  # Formatting
+  scale_color_manual(values = c("NPMLE" = "steelblue", "Parametric" = "firebrick"),name=NULL) +
+  labs(
+    title = "Estimated Priors",
+    x = "Prior Support (b)", 
+    y = "Density / Scaled Probability"
+  ) +
+  theme_minimal()
+
+print(plot_combined_prior)
+```

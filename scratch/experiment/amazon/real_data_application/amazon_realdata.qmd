@@ -1,0 +1,169 @@
+---
+title: "Amazon"
+format: html
+---
+
+```{r}
+#| label: load-pkgs
+#| code-summary: "Packages"
+#| message: false
+library(MASS)
+library(ggplot2)
+library(reshape2)
+library(knitr)
+library(progress)
+library(REBayes)
+```
+
+
+```{r}
+source("../../../function/function.R")
+source("../../../function/function_load_data.R")
+```
+
+# Load Data
+```{r}
+library(hdf5r)
+library(rhdf5)
+```
+
+```{r}
+file <- "../amazon_review.h5"
+sum_stat <- load_data_amazon(file, r = 0.2, seed = 123)
+updated_stat <- calculate_unipt_and_update(sum_stat)
+updated_stat_clean <- updated_stat[complete.cases(updated_stat), ]
+```
+
+
+# Inference
+
+```{r}
+get_input_vectors <- function(df, prefix = "") {
+  # Handles both standard and 'lambda_' (unipt) prefixes
+  list(
+    beta  = df[[paste0(prefix, "theta_hat")]],
+    delta = df[[paste0(prefix, "b_hat")]],
+    seb   = sqrt(df[[paste0(prefix, "var_theta_hat")]]),
+    sed   = sqrt(df[[paste0(prefix, "var_b_hat")]]),
+    rho   = df[[paste0(prefix, "corr_theta_b")]]
+  )
+}
+```
+
+
+```{r}
+get_asymmetric_results <- function(df, u_val = 50,alpha=0.05) {
+  std <- get_input_vectors(df)
+  uni <- get_input_vectors(df, "lambda_")
+  
+  npmle_prior   <- GNmix_diffvar(std$delta, std$sed, u = u_val,verbose = FALSE)
+  param_prior   <- estimate_parametric_mle(std$delta, std$sed)
+  
+  
+  uni_npmle_prior <- GNmix_diffvar(uni$delta, uni$sed, u = u_val,verbose = FALSE)
+  uni_param_prior <- estimate_parametric_mle(uni$delta, uni$sed)
+
+  res_list <- list(
+    classic        = mapply(cal_ci_normal, df$Y_bar, sqrt(df$var_Y_bar), MoreArgs = list(alpha = alpha)),
+    npmle          = mapply(cal_ci_npmle, std$beta, std$delta, std$seb, std$sed, std$rho, 
+                            MoreArgs = list(v = as.matrix(npmle_prior$u), p = npmle_prior$fu, alpha = alpha)),
+    param          = mapply(cal_ci_parametric, std$beta, std$delta, std$seb, std$sed, std$rho, 
+                            MoreArgs = list(a = param_prior$hat_mu_b, b = param_prior$hat_var_b, alpha = alpha)),
+    ppi            = mapply(cal_ci_normal, std$beta, std$seb, MoreArgs = list(alpha = alpha)),
+    
+    unipt_npmle      = mapply(cal_ci_npmle, uni$beta, uni$delta, uni$seb, uni$sed, uni$rho, 
+                            MoreArgs = list(v = as.matrix(uni_npmle_prior$u), p = uni_npmle_prior$fu, alpha = alpha)),
+    unipt_param      = mapply(cal_ci_parametric, uni$beta, uni$delta, uni$seb, uni$sed, uni$rho, 
+                            MoreArgs = list(a = uni_param_prior$hat_mu_b, b = uni_param_prior$hat_var_b, alpha = alpha)),
+    unipt        = mapply(cal_ci_normal, uni$beta, uni$seb, MoreArgs = list(alpha = alpha))
+  )
+
+  ci_mats <- lapply(res_list, function(x) {
+    m <- t(x)
+    colnames(m) <- c("lower", "upper")
+    return(m)
+  })
+
+  return(list(ci_matrices = ci_mats, priors = list(std_npmle = npmle_prior, std_param = param_prior, uni_npmle = uni_npmle_prior, uni_param = uni_param_prior)))
+}
+```
+
+```{r}
+calculate_avg_of_ratios <- function(results_obj) {
+  mats <- results_obj$ci_matrices
+  
+  classic_lengths <- mats$classic[, 2] - mats$classic[, 1]
+  avg_ratios <- sapply(mats, function(m) {
+    if(is.null(m)) return(NA)
+    current_lengths <- m[, 2] - m[, 1]
+    individual_ratios <- current_lengths / classic_lengths
+    mean(individual_ratios, na.rm = TRUE)
+  })
+  
+  return(avg_ratios)
+}
+```
+
+
+```{r}
+run_repeated_simulation <- function(file, n_repeats = 200, r_split = 0.2, u_val = 50,alpha=0.05) {
+  trial_cov_asym <- list()
+  trial_rat_asym <- list()
+  
+  pb <- txtProgressBar(min = 0, max = n_repeats, style = 3)
+  
+  for (i in 1:n_repeats) {
+    setTxtProgressBar(pb, i)
+
+    sum_stat <- load_data_amazon(file, r = r_split)
+    updated_stat <- calculate_unipt_and_update(sum_stat)
+    
+    updated_stat_clean_2 <- updated_stat[
+      complete.cases(updated_stat) & 
+        updated_stat$var_b_hat > 1e-10, 
+    ]
+    
+    asym_res <- get_asymmetric_results(updated_stat_clean_2, u_val = u_val,alpha=alpha)
+    
+    theta_true <- updated_stat_clean_2$theta_true
+    
+    # 4. Metric extraction
+    trial_cov_asym[[i]] <- unlist(
+      lapply(asym_res$ci_matrices, cov_rate, theta = theta_true)
+    )
+    
+    trial_rat_asym[[i]] <- calculate_avg_of_ratios(asym_res)
+  }
+  
+  close(pb)
+  
+  c_mat <- do.call(rbind, trial_cov_asym)
+  r_mat <- do.call(rbind, trial_rat_asym)
+  
+  df_asymmetric <- data.frame(
+    Method = colnames(c_mat),
+    Avg_Coverage = colMeans(c_mat, na.rm = TRUE),
+    Avg_Length_Ratio = colMeans(r_mat, na.rm = TRUE)
+  )
+  
+  return(df_asymmetric)
+}
+```
+
+```{r}
+set.seed(123)
+result <- run_repeated_simulation(file, n_repeats = 200,alpha=0.05)
+```
+
+```{r}
+result
+```
+
+```{r}
+set.seed(123)
+result <- run_repeated_simulation(file, n_repeats = 200,alpha=0.1)
+```
+
+```{r}
+result
+```

@@ -1,0 +1,438 @@
+---
+title: "Amazon synthetic"
+format: html
+---
+
+```{r}
+#| label: load-pkgs
+#| code-summary: "Packages"
+#| message: false
+library(MASS)
+library(ggplot2)
+library(reshape2)
+library(progress)
+library(REBayes)
+```
+
+
+```{r}
+source("../../../function/function.R")
+source("../../../function/function_load_data.R")
+```
+
+
+## Load Covariance Matrix
+
+```{r}
+file <- "data/amazon/amazon_review.h5"
+sum_stat <- load_data_amazon(file, r = 0.2, seed = 123)
+```
+
+```{r}
+sum_stat_clean <- sum_stat[complete.cases(sum_stat), ]
+se_beta_set <-  sqrt(sum_stat_clean$var_theta_hat)
+se_delta_set <- sqrt(sum_stat_clean$var_b_hat)
+corr_set <- sum_stat_clean$corr_theta_b
+```
+
+
+# Simulation with UniPT method
+
+```{r}
+simulate_ppi_data_unipt <- function(M = 200, updated_stat,
+                                    # Latent distributions:
+                                    mu_theta0 = 4, sd_theta0 = 2,    
+                                    mu_b = -0.1, sd_b = 0.1,       
+                                    seed = NULL){
+  
+  if (!is.null(seed)) set.seed(seed)
+  
+  # BOOTSTRAP EXPERIMENTAL CONDITIONS
+  n_real <- nrow(updated_stat)
+  sampled_indices <- sample(seq_len(n_real), size = M, replace = TRUE)
+  sim_settings <- updated_stat[sampled_indices, ]
+  
+  # Labeled Parameters (Local Labeled Stats)
+  sig_y_lab <- sqrt(sim_settings$var_y_lab)
+  sig_z_lab <- sqrt(sim_settings$var_z_lab)
+  cov_lab   <- sim_settings$cov_yf_lab
+  
+  # Unlabeled Parameters (Local Unlabeled Stats)
+  # var_Z_tilde is already the variance of the mean (s^2_unl / n_unl)
+  # We use this directly to generate the noise for Z_tilde
+  var_mean_unl <- sim_settings$var_Z_tilde
+  
+  # Global Parameter (Used only for Lambda denominator stability)
+  var_f_pop <- sim_settings$var_f_global 
+  
+  # Sample Sizes
+  n_lab <- sim_settings$n_labeled
+  n_unl <- sim_settings$n_unlabeled
+  
+  # GENERATE LATENT VARIABLES
+  true_mu_f     <- rnorm(M, mean = mu_theta0, sd = sd_theta0)
+  true_raw_bias <- rnorm(M, mean = mu_b,      sd = sd_b)
+  true_theta    <- true_mu_f + true_raw_bias
+  
+  # GENERATE OBSERVATIONS
+  Y_bar_vec   <- numeric(M)
+  Z_bar_vec   <- numeric(M)
+  Z_tilde_vec <- numeric(M)
+  
+  for(i in 1:M) {
+    # Labeled Data
+    Sigma_lab <- matrix(c(sig_y_lab[i]^2, cov_lab[i], 
+                          cov_lab[i],     sig_z_lab[i]^2), nrow=2) / n_lab[i]
+    mu_vec <- c(true_theta[i], true_mu_f[i])
+    obs_lab <- mvrnorm(1, mu = mu_vec, Sigma = Sigma_lab)
+    Y_bar_vec[i] <- obs_lab[1]
+    Z_bar_vec[i] <- obs_lab[2]
+    
+    # Unlabeled Data Generation
+    Z_tilde_vec[i] <- rnorm(1, mean = true_mu_f[i], sd = sqrt(var_mean_unl[i]))
+  }
+  
+  # CALCULATE PARAMETERS
+
+  # Lambda Calculation
+  # Numerator: Labeled Covariance
+  # Denominator: We use Global Variance (var_f_pop) as the standard UniPT estimator
+  weights <- (1/n_lab) + (1/n_unl)
+  lambda_sim <- sum(cov_lab / n_lab) / sum(var_f_pop * weights)
+  
+  # UniPT Variances
+  var_resid_tuned <- (sim_settings$var_y_lab + (lambda_sim^2 * sim_settings$var_z_lab) - (2 * lambda_sim * cov_lab))
+  calc_lambda_var_b_hat <- var_resid_tuned / n_lab
+  calc_lambda_var_theta_hat <- calc_lambda_var_b_hat + (lambda_sim^2 * var_mean_unl)
+  
+
+  df_sim <- data.frame(
+    id = 1:M,
+    n_labeled = n_lab,
+    n_unlabeled = n_unl,
+    
+    # --- VANILLA ---
+    b_hat = Y_bar_vec - Z_bar_vec,
+    theta_hat = (Y_bar_vec - Z_bar_vec) + Z_tilde_vec,
+    var_b_hat = sim_settings$var_b_hat,
+    var_theta_hat = sim_settings$var_theta_hat,
+    corr_theta_b = sim_settings$corr_theta_b,
+    
+    # --- UNIPT ---
+    lambda_value = lambda_sim,
+    lambda_b_hat = Y_bar_vec - lambda_sim * Z_bar_vec,
+    lambda_theta_hat = (Y_bar_vec - lambda_sim * Z_bar_vec) + (lambda_sim * Z_tilde_vec),
+    lambda_var_b_hat = calc_lambda_var_b_hat,
+    lambda_var_theta_hat = calc_lambda_var_theta_hat,
+    lambda_corr_theta_b = sqrt(calc_lambda_var_b_hat / calc_lambda_var_theta_hat),
+    
+    # --- CLASSIC (for baseline CI) ---
+    Y_bar     = Y_bar_vec,                  # mean of labeled Y
+    var_Y_bar = sim_settings$var_y_lab / n_lab,  # Var(mean) = Var(per obs)/n
+    
+    # --- TRUTH ---
+    true_theta = true_theta,
+    true_theta_0 = true_mu_f,
+    true_b = true_raw_bias,
+    true_b_lambda = true_theta - (lambda_sim * true_mu_f)
+  )
+  return(df_sim)
+}
+```
+
+```{r}
+M <- 200
+updated_stat <- calculate_unipt_and_update(sum_stat)
+data <- simulate_ppi_data_unipt(M, updated_stat, mu_theta0 = 4, sd_theta0 = 2, mu_b = -0.1, sd_b = 0.1,seed = 123)
+```
+
+
+```{r}
+estimate_all_priors <- function(data,u=50) {
+  
+  # A. Parametric Estimation (MLE)
+  parametric_res <- estimate_parametric_mle(data$b_hat, sqrt(data$var_b_hat))
+  
+  # B. NPMLE Estimation
+  # Note: Assuming GNmix_diffvar is loaded
+  npmle_res <- GNmix_diffvar(data$b_hat, sqrt(data$var_b_hat), u, verbose = FALSE)
+  
+  # C. Parametric Estimation with UniPT
+  parametric_unipt_res <- estimate_parametric_mle(data$lambda_b_hat, sqrt(data$lambda_var_b_hat))
+  
+  # B. NPMLE Estimation with UniPT
+  # Note: Assuming GNmix_diffvar is loaded
+  npmle_unipt_res <- GNmix_diffvar(data$lambda_b_hat, sqrt(data$lambda_var_b_hat), u, verbose = FALSE)
+  
+  # Return a structured list
+  list(
+    parametric = list(
+      mu  = parametric_res$hat_mu_b,
+      var = parametric_res$hat_var_b
+    ),
+    npmle = list(
+      value = as.matrix(npmle_res$u),
+      probability = npmle_res$fu
+    ),
+    parametric_unipt = list(
+      mu  = parametric_unipt_res$hat_mu_b,
+      var = parametric_unipt_res$hat_var_b
+    ),
+    npmle_unipt = list(
+      value = as.matrix(npmle_unipt_res$u),
+      probability = npmle_unipt_res$fu
+    )
+  )
+}
+```
+
+```{r}
+mu_theta0 = 4
+sd_theta0 = 2
+mu_b = -0.1
+sd_b = 0.1
+alpha = 0.05
+```
+
+```{r}
+calc_cis <- function(data, priors, 
+                                mu_theta0 = 4, sd_theta0 = 2,    # theta0_j ~ N(4,4)
+                                mu_b = -0.1, sd_b = 0.1, 
+                                alpha = 0.05) {
+  # =========================================================================
+  # PART A: VANILLA METHODS (No Tuning)
+  # =========================================================================
+  
+  # 0. TRUE prior (Oracle)
+  ci_true_list <- mapply(
+    FUN = function(beta, delta, seb, sed, rho) {
+      cal_ci_parametric(mu_b, sd_b^2, beta, delta, seb, sed, rho, alpha)
+    },
+    beta = data$theta_hat, delta = data$b_hat, 
+    seb = sqrt(data$var_theta_hat), sed = sqrt(data$var_b_hat), rho = data$corr_theta_b,
+    SIMPLIFY = FALSE
+  )
+  ci_mat_true <- do.call(rbind, ci_true_list)
+  colnames(ci_mat_true) <- c("lower", "upper")
+  
+  # 1. PPI CI
+  ci_ppi_direct_list <- mapply(
+    FUN = function(est, se) cal_ci_normal(est, se, alpha = alpha),
+    est = data$theta_hat,
+    se  = sqrt(data$var_theta_hat),
+    SIMPLIFY = FALSE
+  )
+  ci_mat_ppi_direct <- do.call(rbind, ci_ppi_direct_list)
+  colnames(ci_mat_ppi_direct) <- c("lower", "upper")
+  
+  # 2. CI with PARAMETRIC prior
+  ci_param_list <- mapply(
+    FUN = function(beta, delta, seb, sed, rho) {
+      cal_ci_parametric(priors$parametric$mu, priors$parametric$var, 
+                        beta, delta, seb, sed, rho, alpha)
+    },
+    beta = data$theta_hat, delta = data$b_hat, 
+    seb = sqrt(data$var_theta_hat), sed = sqrt(data$var_b_hat), rho = data$corr_theta_b,
+    SIMPLIFY = FALSE
+  )
+  ci_mat_param <- do.call(rbind, ci_param_list)
+  colnames(ci_mat_param) <- c("lower", "upper")
+  
+  # 3. CI with NPMLE prior
+  ci_npmle_list <- mapply(
+    FUN = function(beta, delta, seb, sed, rho) {
+      cal_ci_npmle(priors$npmle$value, priors$npmle$probability, 
+                   beta, delta, seb, sed, rho, alpha)
+    },
+    beta = data$theta_hat, delta = data$b_hat, 
+    seb = sqrt(data$var_theta_hat), sed = sqrt(data$var_b_hat), rho = data$corr_theta_b,
+    SIMPLIFY = FALSE
+  )
+  ci_mat_npmle <- do.call(rbind, ci_npmle_list)
+  colnames(ci_mat_npmle) <- c("lower", "upper")
+  
+  # =========================================================================
+  # PART B: UNIPT METHODS (Tuned)
+  # =========================================================================
+  
+  # 4. UniPT CI
+  ci_unipt_direct_list <- mapply(
+    FUN = function(est, se) cal_ci_normal(est, se, alpha = alpha),
+    est = data$lambda_theta_hat,
+    se  = sqrt(data$lambda_var_theta_hat),
+    SIMPLIFY = FALSE
+  )
+  ci_mat_unipt_direct <- do.call(rbind, ci_unipt_direct_list)
+  colnames(ci_mat_unipt_direct) <- c("lower", "upper")
+  
+  # 5. UniPT CI with PARAMETRIC prior
+  ci_unipt_param_list <- mapply(
+    FUN = function(beta, delta, seb, sed, rho) {
+      cal_ci_parametric(priors$parametric_unipt$mu, priors$parametric_unipt$var, 
+                        beta, delta, seb, sed, rho, alpha)
+    },
+    beta = data$lambda_theta_hat, delta = data$lambda_b_hat, 
+    seb = sqrt(data$lambda_var_theta_hat), sed = sqrt(data$lambda_var_b_hat), rho = data$lambda_corr_theta_b,
+    SIMPLIFY = FALSE
+  )
+  ci_unipt_mat_param <- do.call(rbind, ci_unipt_param_list)
+  colnames(ci_unipt_mat_param) <- c("lower", "upper")
+  
+  # 6. UniPT CI with NPMLE prior
+  ci_unipt_npmle_list <- mapply(
+    FUN = function(beta, delta, seb, sed, rho) {
+      cal_ci_npmle(priors$npmle_unipt$value, priors$npmle_unipt$probability, 
+                   beta, delta, seb, sed, rho, alpha)
+    },
+    beta = data$lambda_theta_hat, delta = data$lambda_b_hat, 
+    seb = sqrt(data$lambda_var_theta_hat), sed = sqrt(data$lambda_var_b_hat), rho = data$lambda_corr_theta_b,
+    SIMPLIFY = FALSE
+  )
+  ci_unipt_mat_npmle <- do.call(rbind, ci_unipt_npmle_list)
+  colnames(ci_unipt_mat_npmle) <- c("lower", "upper")
+  
+  # 7. Classic baseline 
+  ci_classic_list <- mapply(
+    FUN = function(est, se) cal_ci_normal(est, se, alpha = alpha),
+    est = data$Y_bar, se = sqrt(data$var_Y_bar),
+    SIMPLIFY = FALSE
+  )
+  ci_mat_classic <- do.call(rbind, ci_classic_list); colnames(ci_mat_classic) <- c("lower","upper")
+  
+  # =========================================================================
+  # PART C: METRICS & RETURN
+  # =========================================================================
+  
+  theta_true <- data$true_theta
+  
+  df_cov <- data.frame(
+    cov_oracle        = ci_coverage(ci_mat_true,           theta_true),
+    cov_ppi       = ci_coverage(ci_mat_ppi_direct,     theta_true),
+    cov_parametric       = ci_coverage(ci_mat_param,          theta_true),
+    cov_npmle            = ci_coverage(ci_mat_npmle,          theta_true),
+    cov_unipt     = ci_coverage(ci_mat_unipt_direct,   theta_true),
+    cov_unipt_parametric = ci_coverage(ci_unipt_mat_param,    theta_true),
+    cov_unipt_npmle      = ci_coverage(ci_unipt_mat_npmle,    theta_true),
+    cov_classic          = ci_coverage(ci_mat_classic,        theta_true)
+  )
+
+  df_len <- data.frame(
+    len_oracle        = ci_avg_length(ci_mat_true),
+    len_ppi      = ci_avg_length(ci_mat_ppi_direct),
+    len_parametric       = ci_avg_length(ci_mat_param),
+    len_npmle            = ci_avg_length(ci_mat_npmle),
+    len_unipt     = ci_avg_length(ci_mat_unipt_direct),
+    len_unipt_parametric = ci_avg_length(ci_unipt_mat_param),
+    len_unipt_npmle      = ci_avg_length(ci_unipt_mat_npmle),
+    len_classic          = ci_avg_length(ci_mat_classic)
+  )
+
+  df_ratio <- data.frame(
+    ratio_oracle        = ci_mean_ratio(ci_mat_true,         ci_mat_classic),
+    ratio_ppi       = ci_mean_ratio(ci_mat_ppi_direct,   ci_mat_classic),
+    ratio_parametric       = ci_mean_ratio(ci_mat_param,        ci_mat_classic),
+    ratio_npmle            = ci_mean_ratio(ci_mat_npmle,        ci_mat_classic),
+    ratio_unipt     = ci_mean_ratio(ci_mat_unipt_direct, ci_mat_classic),
+    ratio_unipt_parametric = ci_mean_ratio(ci_unipt_mat_param,  ci_mat_classic),
+    ratio_unipt_npmle      = ci_mean_ratio(ci_unipt_mat_npmle,  ci_mat_classic)
+  )
+  
+  # Return list of matrices and metrics
+  list(
+    coverage = df_cov,
+    length   = df_len,
+    length_ratio = df_ratio,
+  
+    oracle_parametric        = ci_mat_true,
+    ppi       = ci_mat_ppi_direct,
+    parametric        = ci_mat_param,
+    npmle             = ci_mat_npmle,
+    unipt     = ci_mat_unipt_direct,
+    unipt_parametric  = ci_unipt_mat_param,
+    unipt_npmle       = ci_unipt_mat_npmle,
+    classic           = ci_mat_classic
+  )
+}
+```
+
+```{r}
+run_many <- function(simulate_times,
+                     M = 200,
+                     updated_stat,
+                     mu_theta0 = 4, sd_theta0 = 2,
+                     mu_b = -0.1, sd_b = 0.1,
+                     alpha = 0.05) {
+
+  sim_idx <- seq_len(simulate_times)
+
+  pb <- txtProgressBar(min = 0, max = simulate_times, style = 3)
+  on.exit(close(pb), add = TRUE)
+
+  cov_cols <- vector("list", simulate_times)
+  len_cols <- vector("list", simulate_times)
+  lenratio_cols <- vector("list", simulate_times)
+
+  for (i in sim_idx) {
+
+    data <- simulate_ppi_data_unipt(M = M, updated_stat = updated_stat,
+                                    mu_theta0 = mu_theta0,sd_theta0 = sd_theta0,
+                                    mu_b = mu_b,sd_b = sd_b)
+
+    priors <- estimate_all_priors(data)
+
+    res_i <- calc_cis(data = data,priors = priors,
+                      mu_theta0 = mu_theta0,sd_theta0 = sd_theta0,
+                      mu_b = mu_b,sd_b = sd_b,alpha = alpha)
+
+    cov_cols[[i]] <- t(res_i$coverage)
+    len_cols[[i]] <- t(res_i$length)
+    lenratio_cols[[i]] <- t(res_i$length_ratio)
+
+    setTxtProgressBar(pb, i)
+  }
+
+  cov_mat <- do.call(cbind, cov_cols)
+  len_mat <- do.call(cbind, len_cols)
+  lenratio_mat <- do.call(cbind, lenratio_cols)
+
+  colnames(cov_mat) <- paste0("sim", sim_idx)
+  colnames(len_mat) <- paste0("sim", sim_idx)
+  colnames(lenratio_mat) <- paste0("sim", sim_idx)
+
+  cov_df <- as.data.frame(cov_mat)
+  len_df <- as.data.frame(len_mat)
+  lenratio_df <- as.data.frame(lenratio_mat)
+
+  list(
+    coverage = cov_df,
+    length = len_df,
+    length_ratio = lenratio_df
+  )
+}
+```
+
+
+Change sd_b from (0.01,0.03,0.05,0.1)
+
+```{r}
+set.seed(1)
+simulate_times=500
+result <- run_many(simulate_times,
+                     M = 200,
+                     updated_stat,
+                     mu_theta0 = 4, sd_theta0 = 0.01,
+                     mu_b = -0.1, sd_b = 0.01,
+                     alpha = 0.05) 
+```
+
+```{r}
+rowMeans(result$coverage)
+```
+```{r}
+rowMeans(result$length)
+```
+```{r}
+rowMeans(result$length_ratio)
+```
+
+
