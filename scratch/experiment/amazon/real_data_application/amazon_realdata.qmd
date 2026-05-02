@@ -167,3 +167,214 @@ result <- run_repeated_simulation(file, n_repeats = 200,alpha=0.1)
 ```{r}
 result
 ```
+
+# Plot
+```{r}
+func_plot_modified <- function(plot){
+  p<- plot + 
+    theme_bw(base_size = 14) +  
+    theme(
+      plot.title = element_text(face = "bold",hjust = 0.5),
+      axis.title.x = element_text(face = "bold",size = 22),  
+      axis.title.y = element_text(face = "bold",size = 22),
+      panel.border = element_rect(color = "black", fill = NA, size = 1.5),
+      
+      # Remove default axis lines
+      axis.line = element_blank(),
+      
+      # Remove grid lines
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      
+      # Legend
+      legend.text = element_text(face = "bold",size = 14),
+      legend.position = "inside",           # Instead of c(x, y)
+      legend.position.inside = c(0.98, 0.97), 
+      legend.justification = c(1, 1),
+      
+      # Border around the legend
+      #legend.box.background = element_rect(color = "gray50", size = 0.5),
+      legend.background = element_rect(fill = "NA"),
+      
+      # Spacing inside the legend box
+      legend.box.margin = margin(0.1, 0.1, 0.1, 0.1),   
+      legend.spacing.x = unit(0, "cm"),       
+      legend.spacing.y = unit(-0.3, "cm"),  
+      legend.key.width = unit(2, "lines"),
+      legend.key.height = unit(1.2, "lines"),
+      
+      axis.text.x  = element_text(size = 20),
+      axis.text.y  = element_text(size = 20)
+    )
+  
+  p
+}
+```
+
+```{r}
+std <- get_input_vectors(updated_stat)
+uni <- get_input_vectors(updated_stat, "lambda_")
+```
+
+```{r}
+result <-GNmix_diffvar(std$delta,std$sed,u = 50)
+value <- as.matrix(result$u)
+probability <- result$fu
+```
+
+```{r}
+parametric_prior <-estimate_parametric_mle(std$delta,std$sed)
+```
+
+```{r}
+result_uni <-GNmix_diffvar(uni$delta,uni$sed,u = 50)
+value_uni <- as.matrix(result_uni$u)
+probability_uni <- result_uni$fu
+```
+
+```{r}
+parametric_prior_uni <-estimate_parametric_mle(uni$delta,uni$sed)
+```
+
+```{r}
+mu_param <- parametric_prior$hat_mu_b
+sd_param <- sqrt(parametric_prior$hat_var_b)
+
+scale_factor <- 23
+df_prior <- data.frame(
+  value = as.numeric(value), 
+  probability = as.numeric(probability) * scale_factor
+)
+
+plot_prior <- ggplot() +
+  stat_function(data = data.frame(x = c(min(df_prior$value), max(df_prior$value) +0.25)),
+                aes(x = x, color = "Parametric"),
+                fun = dnorm, 
+                args = list(mean = mu_param, sd = sd_param),
+                linewidth = 1.5) +
+  geom_segment(data = df_prior, 
+               aes(x = value, xend = value, y = 0, yend = probability, color = "NPMLE"), 
+               linewidth = 1.5) +
+  scale_color_manual(
+    values = c("Parametric" = "firebrick", "NPMLE" = "steelblue"),
+    breaks = c("Parametric", "NPMLE"),
+    name = NULL
+  ) +
+  labs(
+    x = expression(bold(b)), 
+    y = expression(bold(g(b)))
+  ) +
+  theme_minimal()
+plot_prior <- func_plot_modified(plot_prior)+ theme(legend.text = element_text(face = "bold",size = 20))
+print(plot_prior)
+```
+
+```{r}
+x_vals <- seq(min(std$delta), max(std$delta), length.out = 100)
+y_npmle <- sapply(x_vals, average_marginal_delta_npmle, value = value, probability = probability, se_delta_set=std$sed)
+y_param <- sapply(x_vals, average_marginal_delta_parametric, a = parametric_prior$hat_mu_b, b = parametric_prior$hat_var_b, se_delta_set=std$sed)
+df_lines <- rbind(
+  data.frame(x = x_vals, y = y_npmle,  method = "NPMLE"),
+  data.frame(x = x_vals, y = y_param,  method = "Parametric")
+)
+
+p <- ggplot() +
+  geom_histogram(
+    data = data.frame(delta_g = std$delta),
+    aes(x = delta_g, y = after_stat(density), fill = "Histogram"),
+    bins = 20, alpha = 0.3, color = "grey50"
+  ) +
+  geom_line(
+    data = df_lines,
+    aes(x = x, y = y, color = method),
+    size = 1.5
+  ) +
+  labs(
+    x = expression(bold(hat(b)[i])),
+    y = "Density"
+  ) +
+  scale_fill_manual(values = c("Histogram" = "gray"), name = NULL) +
+  scale_color_manual(
+    values = c("Parametric" = "firebrick","NPMLE" = "steelblue"),
+    name = NULL
+  )+
+  theme_minimal() 
+plot_marginal <- func_plot_modified(p)+ theme(legend.position = "none")
+print(plot_marginal)
+```
+
+```{r}
+mu_param_uni <- parametric_prior_uni$hat_mu_b
+sd_param_uni <- sqrt(parametric_prior_uni$hat_var_b)
+
+scale_factor <- 12
+df_prior <- data.frame(
+  value = as.numeric(value_uni), 
+  probability = as.numeric(probability_uni) * scale_factor
+)
+
+plot_prior_uni <- ggplot() +
+  geom_segment(data = df_prior, 
+               aes(x = value, xend = value, y = 0, yend = probability, color = "NPMLE"), 
+               linewidth = 1.5) +
+  stat_function(data = data.frame(x = c(min(df_prior$value), max(df_prior$value) +0.25)),
+                aes(x = x, color = "Parametric"),
+                fun = dnorm, 
+                args = list(mean = mu_param_uni, sd = sd_param_uni),
+                linewidth = 1.5) +
+  scale_color_manual(
+    values = c("Parametric" = "firebrick", "NPMLE" = "steelblue"),
+    breaks = c("Parametric", "NPMLE"),
+    name = NULL
+  ) +
+  labs(
+    x = expression(bold(b)^hat(lambda)), 
+    y = expression(bold(g)(bold(b)^hat(lambda)))
+  ) +
+  theme_minimal()
+plot_prior_uni <- func_plot_modified(plot_prior_uni)+ theme(legend.text = element_text(face = "bold",size = 20))
+print(plot_prior_uni)
+```
+
+```{r}
+x_vals <- seq(min(uni$delta), max(uni$delta), length.out = 100)
+y_npmle <- sapply(x_vals, average_marginal_delta_npmle, value = value_uni, probability = probability_uni, se_delta_set=uni$sed)
+y_param <- sapply(x_vals, average_marginal_delta_parametric, a = parametric_prior_uni$hat_mu_b, b = parametric_prior_uni$hat_var_b, se_delta_set=uni$sed)
+df_lines <- rbind(
+  data.frame(x = x_vals, y = y_npmle,  method = "NPMLE"),
+  data.frame(x = x_vals, y = y_param,  method = "Parametric")
+)
+
+p <- ggplot() +
+  geom_histogram(
+    data = data.frame(delta_g = uni$delta),
+    aes(x = delta_g, y = after_stat(density), fill = "Histogram"),
+    bins = 20, alpha = 0.3, color = "grey50"
+  ) +
+  geom_line(
+    data = df_lines,
+    aes(x = x, y = y, color = method),
+    size = 1.5
+  ) +
+  labs(
+    x = expression(bold(hat(b)[i])^hat(lambda)),
+    y = "Density"
+  ) +
+  scale_fill_manual(values = c("Histogram" = "gray"), name = NULL) +
+  scale_color_manual(
+    values = c("Parametric" = "firebrick","NPMLE" = "steelblue"),
+    name = NULL
+  )+
+  theme_minimal() 
+plot_marginal_uni <- func_plot_modified(p)+ theme(legend.position = "none")
+print(plot_marginal_uni)
+```
+
+```{r}
+location <-"figure/"
+ggsave(filename =  paste0(location,"prior.pdf"), plot = plot_prior, width = 8, height = 6, dpi = 300)
+ggsave(filename =  paste0(location,"marginal.pdf"), plot = plot_marginal, width = 8, height = 6, dpi = 300)
+ggsave(filename =  paste0(location,"prior_uni.pdf"), plot = plot_prior_uni, width = 8, height = 6, dpi = 300)
+ggsave(filename = paste0(location,"marginal_uni.pdf"), plot = plot_marginal_uni, width = 8, height =6, dpi = 300)
+```
+
