@@ -1,6 +1,7 @@
 """LMArena CI benchmark — run experiment and save raw per-trial results.
 
-Saves three files in `src/scripts/lmarena_ci_results/`:
+Saves three files in `/tmp/lmarena_ci_results/` (so the outputs are not tracked
+by git):
     raw.csv      -- one row per (alpha, trial), columns are
                     {method}_coverage and {method}_width for every method
     summary.csv  -- mean/SE per (alpha, method)
@@ -34,16 +35,29 @@ from pas.experiments import run_ci_benchmark
 from pas.intervals import CORE_CI_METHODS
 
 
-# Methods to run. Superset of plot methods and table methods.
+# Methods to run. Superset of plot methods and table methods. The current
+# focus is the PT-based rebiased estimators, so we run a slim set:
+#
+#   - Classic             : mle_ci
+#   - Prediction Mean     : pred_mean_ci
+#   - PPI                 : ppi_ci
+#   - PT                  : pt_ci  (power-tuned PPI baseline)
+#   - PT-Param  (ours)    : eb_pt_ci
+#   - PT-NPMLE  (ours)    : eb_npmle_pt_ci
+#
+# The earlier PPI- / UniPT-flavored EB methods are kept in CORE_CI_METHODS but
+# commented out below so they do not eat compute on every run.
 RUN_METHODS = [
-    "mle_ci",                  # Classic
-    "pred_mean_ci",            # Prediction Mean (plot only)
-    "ppi_ci",                  # Vanilla PPI (table only)
-    "pt_ci",                   # Power-Tuned PPI (= UniPT in table)
-    "eb_ppi_ci",               # PPI-Param
-    "eb_npmle_ppi_ci",         # PPI-NPMLE
-    "eb_unipt_ppi_ci",         # UniPT-Param
-    "eb_npmle_unipt_ppi_ci",   # UniPT-NPMLE
+    "mle_ci",            # Classic
+    "pred_mean_ci",      # Prediction Mean
+    "ppi_ci",            # Vanilla PPI
+    "pt_ci",             # Power-Tuned PPI baseline
+    "eb_pt_ci",          # PT-Param  (ours)
+    "eb_npmle_pt_ci",    # PT-NPMLE  (ours)
+    # "eb_ppi_ci",             # PPI-Param   (older PPI-flavored variant)
+    # "eb_npmle_ppi_ci",       # PPI-NPMLE
+    # "eb_unipt_ppi_ci",       # UniPT-Param
+    # "eb_npmle_unipt_ppi_ci", # UniPT-NPMLE
 ]
 
 
@@ -70,10 +84,10 @@ def main():
     parser.add_argument("--alphas", type=float, nargs="+",
                         default=[0.01, 0.05, 0.10, 0.20, 0.30])
     parser.add_argument("--train-test-split", type=float, default=0.1)
-    parser.add_argument("--num-workers", type=int, default=1,
-                        help="Number of worker processes (default 1 = serial).")
+    parser.add_argument("--num-workers", type=int, default=4,
+                        help="Number of worker processes (default 4).")
     parser.add_argument("--out-dir", type=Path,
-                        default=Path(__file__).parent / "lmarena_ci_results")
+                        default=Path("/tmp/lmarena_ci_results"))
     args = parser.parse_args()
 
     args.out_dir.mkdir(parents=True, exist_ok=True)

@@ -1,11 +1,15 @@
 """
 Empirical Bayes (EB) adjusted PPI confidence intervals for the mean.
 """
+from typing import Tuple
+
 import numpy as np
 from pas.datasets.dataset import PasDataset
 from pas.estimators.eb_estimators import (
     _get_generic_ppi_estimators_plus_bias,
     _get_global_ppi_lambda,
+    _get_power_tuned_lambdas,
+    _get_power_tuned_ppi_estimators_plus_bias,
     _param_prior_computation_for_bias,
 )
 from pas.utils import _zconfint
@@ -85,3 +89,46 @@ def get_eb_unipt_ppi_cis(data: PasDataset, alpha: float = 0.1,
         data.pred_unlabelled, data.pred_labelled, data.y_labelled, lambda_)
     return _eb_ppi_ci_from_components(
         ppi, bias, cov_matrix, corr_threshold, alpha, alternative)
+
+
+def get_eb_power_tuned_cis(
+    data: PasDataset,
+    alpha: float = 0.1,
+    alternative: str = "two-sided",
+    corr_threshold: float = 1.0,
+    clip_lambda: Tuple[float, float] = (0.0, 1.0),
+) -> np.ndarray:
+    """EB-adjusted power-tuned PPI confidence interval for each problem's mean.
+
+    Args:
+        data: Dataset with M problems.
+        alpha: Error level; targets 1-alpha coverage. Default 0.1 (90% CI).
+        alternative: "two-sided", "larger", or "smaller".
+        corr_threshold: only apply EB when correlation(pt, bias) < threshold.
+        clip_lambda: bounds for each problem-wise lambda_i. Default is (0, 1).
+
+    Returns:
+        np.ndarray of shape (M, 2) with columns [lower, upper].
+    """
+    lambdas = _get_power_tuned_lambdas(
+        data.pred_unlabelled,
+        data.pred_labelled,
+        data.y_labelled,
+        clip=clip_lambda,
+    )
+
+    _, bias, pt, cov_matrix = _get_power_tuned_ppi_estimators_plus_bias(
+        data.pred_unlabelled,
+        data.pred_labelled,
+        data.y_labelled,
+        lambdas,
+    )
+
+    return _eb_ppi_ci_from_components(
+        pt,
+        bias,
+        cov_matrix,
+        corr_threshold,
+        alpha,
+        alternative,
+    )

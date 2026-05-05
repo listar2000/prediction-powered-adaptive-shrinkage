@@ -205,3 +205,155 @@ def get_eb_unipt_ppi_estimators(data: PasDataset, corr_threshold: float = 1.0) -
     ppi, bias, cov_matrix = _get_generic_ppi_estimators_plus_bias(
         data.pred_unlabelled, data.pred_labelled, data.y_labelled, lambda_)
     return _apply_eb_with_corr_filter(ppi, bias, cov_matrix, corr_threshold)
+
+
+# ---------------------------------------------------------------------------
+# Power-tuned estimators
+# ---------------------------------------------------------------------------
+def _get_power_tuned_lambdas(
+    f_x_tilde: np.ndarray,
+    f_x: np.ndarray,
+    y: np.ndarray,
+    clip: Tuple[float, float] = (0.0, 1.0),
+) -> np.ndarray:
+    """Estimate problem-wise power-tuned lambda_i.
+
+    Args:
+        f_x_tilde: unlabelled predictions, one array per problem.
+        f_x: labelled predictions, one array per problem.
+        y: labelled outcomes, one array per problem.
+        clip: optional lower and upper bounds for lambda_i.
+
+    Returns:
+        lambdas: problem-wise lambda_i, shape (M,).
+    """
+    lambdas = []
+
+    for i in range(len(y)):
+        n_i = len(y[i])
+        N_i = len(f_x_tilde[i])
+
+        cov_yz_i = np.cov(y[i], f_x[i], ddof=1)[0, 1]
+
+        z_all_i = np.concatenate([f_x[i], f_x_tilde[i]])
+        var_f_global_i = np.var(z_all_i, ddof=1)
+
+        numerator = cov_yz_i / n_i
+        denominator = var_f_global_i * (1.0 / n_i + 1.0 / N_i)
+
+        lambda_i = numerator / denominator
+        lambda_i = np.clip(lambda_i, clip[0], clip[1])
+
+        lambdas.append(float(lambda_i))
+
+    return np.array(lambdas)
+
+
+def _get_power_tuned_ppi_estimators_plus_bias(
+    f_x_tilde: np.ndarray,
+    f_x: np.ndarray,
+    y: np.ndarray,
+    lambdas: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Construct the proposed power-tuned PPI estimator in biased-minus-bias form.
+
+    Returns:
+        theta_b: biased estimator ztildebar_i, shape (M,).
+        bias: new estimated bias b_hat_{i,lambda}, shape (M,).
+        pt: unadjusted power-tuned PPI estimator, shape (M,).
+        cov_mats: covariance matrices for (pt_i, bias_i), shape (M, 2, 2).
+            This is the form expected by _get_generic_eb_ppi_estimators.
+    """
+    theta_b = []
+    bias = []
+    pt = []
+    cov_mats = []
+
+    for i in range(len(f_x_tilde)):
+        lambda_i = lambdas[i]
+
+        n_i = len(y[i])
+        N_i = len(f_x_tilde[i])
+
+        ybar_i = y[i].mean()
+        zbar_i = f_x[i].mean()
+        ztildebar_i = f_x_tilde[i].mean()
+
+        theta_b_i = ztildebar_i
+
+        bias_i = (
+            ztildebar_i
+            - ybar_i
+            + lambda_i * (zbar_i - ztildebar_i)
+        )
+
+        pt_i = theta_b_i - bias_i
+
+        if n_i > 1 and N_i > 1:
+            var_ybar_i = np.var(y[i], ddof=1) / n_i
+            var_zbar_i = np.var(f_x[i], ddof=1) / n_i
+            var_ztildebar_i = np.var(f_x_tilde[i], ddof=1) / N_i
+            cov_ybar_zbar_i = np.cov(y[i], f_x[i], ddof=1)[0, 1] / n_i
+
+            var_label_i = (
+                var_ybar_i
+                + lambda_i**2 * var_zbar_i
+                - 2.0 * lambda_i * cov_ybar_zbar_i
+            )
+            var_pt_i = var_label_i + lambda_i**2 * var_ztildebar_i
+            var_bias_i = (
+                var_label_i
+                + (1.0 - lambda_i)**2 * var_ztildebar_i
+            )
+            cov_pt_bias_i = (
+                -var_label_i
+                + lambda_i * (1.0 - lambda_i) * var_ztildebar_i
+            )
+        else:
+            var_pt_i = np.nan
+            var_bias_i = np.nan
+            cov_pt_bias_i = np.nan
+
+        Sigma_i = np.array([
+            [var_pt_i, cov_pt_bias_i],
+            [cov_pt_bias_i, var_bias_i],
+        ])
+
+        theta_b.append(theta_b_i)
+        bias.append(bias_i)
+        pt.append(pt_i)
+        cov_mats.append(Sigma_i)
+
+    return (
+        np.array(theta_b),
+        np.array(bias),
+        np.array(pt),
+        np.array(cov_mats),
+    )
+
+
+def get_eb_power_tuned_estimators(
+    data: PasDataset,
+    corr_threshold: float = 1.0,
+    clip_lambda: Tuple[float, float] = (0.0, 1.0),
+) -> np.ndarray:
+    """EB-adjusted power-tuned PPI estimator under parametric normal prior.
+
+    Returns:
+        EB-adjusted power-tuned estimates, shape (M,).
+    """
+    lambdas = _get_power_tuned_lambdas(
+        data.pred_unlabelled,
+        data.pred_labelled,
+        data.y_labelled,
+        clip=clip_lambda,
+    )
+
+    _, bias, pt, cov_mats = _get_power_tuned_ppi_estimators_plus_bias(
+        data.pred_unlabelled,
+        data.pred_labelled,
+        data.y_labelled,
+        lambdas,
+    )
+
+    return _apply_eb_with_corr_filter(pt, bias, cov_mats, corr_threshold)

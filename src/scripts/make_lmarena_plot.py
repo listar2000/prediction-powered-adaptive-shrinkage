@@ -23,53 +23,48 @@ import pandas as pd
 
 
 # Methods to plot, in legend order. Mirrors the paper figure (Classical,
-# Prediction Mean, Power-Tuned PPI, Rebiased PPI) plus the additional
-# Param/NPMLE x PPI/UniPT variants.
+# Prediction Mean, PPI, Power-Tuned PPI) plus the two PT-based rebiased
+# estimators contributed in this paper.
 PLOT_METHODS = [
     "mle_ci",
     "pred_mean_ci",
+    # "ppi_ci",
     "pt_ci",
-    "eb_ppi_ci",
-    "eb_npmle_ppi_ci",
-    "eb_unipt_ppi_ci",
-    "eb_npmle_unipt_ppi_ci",
+    "eb_pt_ci",
+    "eb_npmle_pt_ci",
 ]
 
 METHOD_LABELS = {
-    "mle_ci":                "Classical (CLT)",
-    "pred_mean_ci":          "Prediction Mean",
-    "pt_ci":                 "Power-Tuned PPI",
-    "eb_ppi_ci":             "Rebiased PPI Param (ours)",
-    "eb_npmle_ppi_ci":       "Rebiased PPI NPMLE (ours)",
-    "eb_unipt_ppi_ci":       "Rebiased UniPT Param (ours)",
-    "eb_npmle_unipt_ppi_ci": "Rebiased UniPT NPMLE (ours)",
+    "mle_ci":         "Classical",
+    "pred_mean_ci":   "Prediction Mean",
+    # "ppi_ci":         "PPI",
+    "pt_ci":          "PT",
+    "eb_pt_ci":       "PT Param (ours)",
+    "eb_npmle_pt_ci": "PT NPMLE (ours)",
 }
 
 METHOD_COLORS = {
-    "mle_ci":                "#1f77b4",  # blue
-    "pred_mean_ci":          "#bcbd22",  # olive
-    "pt_ci":                 "#d62728",  # red
-    "eb_ppi_ci":             "#9467bd",  # purple (PPI-Param)
-    "eb_npmle_ppi_ci":       "#e377c2",  # pink   (PPI-NPMLE)
-    "eb_unipt_ppi_ci":       "#8c564b",  # brown  (UniPT-Param)
-    "eb_npmle_unipt_ppi_ci": "#17becf",  # cyan   (UniPT-NPMLE)
+    "mle_ci":         "#1f77b4",  # blue
+    "pred_mean_ci":   "#bcbd22",  # olive
+    # "ppi_ci":         "#2ca02c",  # green
+    "pt_ci":          "#d62728",  # red
+    "eb_pt_ci":       "#9467bd",  # purple (PT-Param)
+    "eb_npmle_pt_ci": "#e377c2",  # pink   (PT-NPMLE)
 }
 
 METHOD_MARKERS = {
-    "mle_ci":                "o",
-    "pred_mean_ci":          "v",
-    "pt_ci":                 "D",
-    "eb_ppi_ci":             "P",
-    "eb_npmle_ppi_ci":       "*",
-    "eb_unipt_ppi_ci":       "X",
-    "eb_npmle_unipt_ppi_ci": "h",
+    "mle_ci":         "o",
+    "pred_mean_ci":   "v",
+    # "ppi_ci":         "s",
+    "pt_ci":          "D",
+    "eb_pt_ci":       "P",
+    "eb_npmle_pt_ci": "*",
 }
 
 
-def _no_trailing_zero(x, _pos=None):
-    """Tick formatter: 0.10 -> 0.1, 0.50 -> 0.5, etc."""
-    s = ("%g" % x)
-    return s
+XLIM = (0.007, 0.5)
+YLIM_MISCOV = (0.005, 0.99)
+YTICKS_MISCOV = [0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.3, 0.5]
 
 
 def summarize(raw: pd.DataFrame) -> pd.DataFrame:
@@ -90,29 +85,28 @@ def summarize(raw: pd.DataFrame) -> pd.DataFrame:
 
 
 def make_plot(summary_df: pd.DataFrame, alphas, out_path: Path):
-    # Paper figure has near-square panels with relatively bold markers.
-    fig, axes = plt.subplots(1, 2, figsize=(10, 4.0))
+    fig, axes = plt.subplots(1, 2, figsize=(6.2, 2.6))
 
-    # ---------------- Left: CI Width vs alpha (log x) ----------------
+    # --- Left panel: CI Width vs Alpha ---
     ax = axes[0]
     for method in PLOT_METHODS:
         df_m = summary_df[summary_df["method"] == method].sort_values("alpha")
         ax.errorbar(
-            df_m["alpha"], df_m["mean_width"],
-            yerr=1.96 * df_m["se_width"],
+            df_m["alpha"], df_m["mean_width"], yerr=1.96 * df_m["se_width"],
             label=METHOD_LABELS[method], color=METHOD_COLORS[method],
-            marker=METHOD_MARKERS[method], capsize=3, linewidth=1.5,
-            markersize=8,
+            marker=METHOD_MARKERS[method], capsize=2, linewidth=1.2, markersize=5,
         )
+    ax.set_xlabel(r"$\alpha$", fontsize=11)
+    ax.set_ylabel("Average CI Width", fontsize=11)
     ax.set_xscale("log")
-    ax.set_xlabel(r"$\alpha$", fontsize=13)
-    ax.set_ylabel("Average CI Width", fontsize=13)
+    ax.set_xlim(XLIM)
     ax.set_xticks(alphas)
-    ax.get_xaxis().set_major_formatter(mticker.FuncFormatter(_no_trailing_zero))
-    ax.minorticks_off()
-    ax.grid(True, which="both", alpha=0.3)
+    ax.set_xticklabels([str(a) for a in alphas], fontsize=9)
+    ax.tick_params(axis="y", labelsize=9)
+    ax.xaxis.set_minor_formatter(mticker.NullFormatter())
+    ax.grid(True, alpha=0.3, which="both")
 
-    # ---------------- Right: Miscoverage vs alpha (log-log) ----------------
+    # --- Right panel: Miscoverage vs Alpha ---
     ax = axes[1]
     for method in PLOT_METHODS:
         df_m = summary_df[summary_df["method"] == method].sort_values("alpha")
@@ -120,50 +114,48 @@ def make_plot(summary_df: pd.DataFrame, alphas, out_path: Path):
         ax.errorbar(
             df_m["alpha"], miscov,
             yerr=1.96 * df_m["se_coverage"].astype(float),
-            label=METHOD_LABELS[method], color=METHOD_COLORS[method],
-            marker=METHOD_MARKERS[method], capsize=3, linewidth=1.5,
-            markersize=8,
+            color=METHOD_COLORS[method],
+            marker=METHOD_MARKERS[method], capsize=2, linewidth=1.2, markersize=5,
         )
-
-    # Nominal y=x reference (linear in log-log).
-    diag = np.linspace(min(alphas) * 0.7, max(alphas) * 1.3, 50)
-    ax.plot(diag, diag, "k--", linewidth=1.0, label=r"Nominal $\alpha$")
-
+    diag = np.linspace(XLIM[0], XLIM[1], 100)
+    ax.plot(diag, diag, "k--", linewidth=1)
+    ax.set_xlabel(r"$\alpha$", fontsize=11)
+    ax.set_ylabel("Miscoverage Rate", fontsize=11)
     ax.set_xscale("log")
     ax.set_yscale("log")
-    ax.set_xlabel(r"$\alpha$", fontsize=13)
-    ax.set_ylabel("Miscoverage Rate", fontsize=13)
+    ax.set_xlim(XLIM)
+    ax.set_ylim(YLIM_MISCOV)
     ax.set_xticks(alphas)
-    ax.get_xaxis().set_major_formatter(mticker.FuncFormatter(_no_trailing_zero))
-    ax.set_yticks([0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.3, 0.5])
-    ax.get_yaxis().set_major_formatter(mticker.FuncFormatter(_no_trailing_zero))
-    ax.minorticks_off()
-    ax.grid(True, which="both", alpha=0.3)
+    ax.set_xticklabels([str(a) for a in alphas], fontsize=9)
+    ax.xaxis.set_minor_formatter(mticker.NullFormatter())
+    ax.set_yticks(YTICKS_MISCOV)
+    ax.set_yticklabels([str(y) for y in YTICKS_MISCOV], fontsize=9)
+    ax.yaxis.set_minor_formatter(mticker.NullFormatter())
+    ax.grid(True, alpha=0.3, which="both")
 
-    # Single shared legend at the top, wrapped over 2 rows (paper figure
-    # has 5 entries in 1 row; we have 8 -> use 4 columns x 2 rows).
-    handles, labels = axes[1].get_legend_handles_labels()
-    n_legend = len(handles)
-    ncol = 4 if n_legend > 5 else n_legend
+    # Shared legend at the top, all in one row; nominal handle appended.
+    handles, labels = axes[0].get_legend_handles_labels()
+    nominal_handle = plt.Line2D([], [], color="k", linestyle="--", linewidth=1)
+    handles.append(nominal_handle)
+    labels.append(r"Nominal $\alpha$")
     fig.legend(
-        handles, labels,
-        loc="upper center", bbox_to_anchor=(0.5, 1.04),
-        ncol=ncol, fontsize=9.5, frameon=False,
-        columnspacing=1.4, handletextpad=0.5,
+        handles, labels, loc="upper center", ncol=len(handles),
+        fontsize=8, bbox_to_anchor=(0.5, 1.04), frameon=False,
+        handletextpad=0.4, columnspacing=1.0,
     )
-    # Reserve more vertical space for 2-row legend.
-    legend_pad = 0.84 if n_legend > 5 else 0.92
-    fig.tight_layout(rect=(0, 0, 1, legend_pad))
-    fig.savefig(out_path, bbox_inches="tight", dpi=200)
+
+    fig.tight_layout(pad=1.0)
+    fig.savefig(out_path, bbox_inches="tight", dpi=150)
     print(f"Saved plot -> {out_path}")
 
 
 def main():
     parser = argparse.ArgumentParser()
+    default = Path("/tmp/lmarena_ci_results")
     parser.add_argument("--in-dir", type=Path,
-                        default=Path(__file__).parent / "lmarena_ci_results")
+                        default=default)
     parser.add_argument("--out", type=Path,
-                        default=Path(__file__).parent / "lmarena_ci_npmle.pdf")
+                        default=default / "lmarena_ci_plot.pdf")
     args = parser.parse_args()
 
     raw = pd.read_csv(args.in_dir / "raw.csv")
