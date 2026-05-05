@@ -24,7 +24,7 @@ source("../../../function/function_load_data.R")
 ## Load Covariance Matrix
 
 ```{r}
-file <- "data/amazon/amazon_review.h5"
+file <- "../amazon_review.h5"
 sum_stat <- load_data_amazon(file, r = 0.2, seed = 123)
 ```
 

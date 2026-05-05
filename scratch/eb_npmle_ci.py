@@ -11,6 +11,8 @@ from pas.datasets.dataset import PasDataset
 from pas.estimators.eb_estimators import (
     _get_generic_ppi_estimators_plus_bias,
     _get_global_ppi_lambda,
+    _get_power_tuned_lambdas,
+    _get_power_tuned_ppi_estimators_plus_bias,
 )
 from pas.estimators.eb_npmle_estimator import _npmle_prior_computation_for_bias
 from pas.utils import _zconfint
@@ -323,6 +325,63 @@ def get_npmle_eb_unipt_ppi_cis(
 
     return _npmle_equal_tail_ci_from_components(
         ppi=ppi,
+        bias=bias,
+        cov_matrix=cov_matrix,
+        corr_threshold=corr_threshold,
+        alpha=alpha,
+        alternative=alternative,
+        u=u,
+        threshold=threshold,
+        eps=eps,
+        verbose=verbose,
+        max_iter_em=max_iter_em,
+    )
+
+def get_npmle_eb_power_tuned_cis(
+    data: PasDataset,
+    alpha: float = 0.1,
+    alternative: str = "two-sided",
+    corr_threshold: float = 1.0,
+    clip_lambda: Tuple[float, float] = (0.0, 1.0),
+    u: Union[int, np.ndarray] = 30,
+    threshold: float = 1e-6,
+    eps: float = 1e-5,
+    verbose: bool = False,
+    max_iter_em: int = 0,
+) -> np.ndarray:
+    """NPMLE EB equal-tail confidence intervals for power-tuned PPI.
+
+    Args:
+        data: Dataset with M problems.
+        alpha: Error level; targets 1-alpha coverage. Default 0.1.
+        alternative: "two-sided", "larger", or "smaller".
+        corr_threshold: only apply NPMLE EB when corr(theta_PT, b_hat) < threshold.
+        clip_lambda: bounds for each problem-wise lambda_i. Default is (0, 1).
+        u: grid size or grid points for NPMLE prior.
+        threshold: NPMLE atom weight threshold.
+        eps: grid endpoint padding.
+        verbose: whether to print NPMLE progress messages.
+        max_iter_em: number of EM updates after solving weights on the initial grid.
+
+    Returns:
+        np.ndarray of shape (M, 2) with columns [lower, upper].
+    """
+    lambdas = _get_power_tuned_lambdas(
+        data.pred_unlabelled,
+        data.pred_labelled,
+        data.y_labelled,
+        clip=clip_lambda,
+    )
+
+    _, bias, pt, cov_matrix = _get_power_tuned_ppi_estimators_plus_bias(
+        data.pred_unlabelled,
+        data.pred_labelled,
+        data.y_labelled,
+        lambdas,
+    )
+
+    return _npmle_equal_tail_ci_from_components(
+        ppi=pt,
         bias=bias,
         cov_matrix=cov_matrix,
         corr_threshold=corr_threshold,
