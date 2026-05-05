@@ -1,0 +1,33 @@
+\begin{table}[H]
+\small
+\renewcommand{\arraystretch}{1.2}
+\caption{LMArena CI benchmark across $\alpha\in\{0.01,0.05,0.10,0.20,0.30\}$, averaged over 200 random splits with $m=298$ pairwise LLM problems. Length-ratio is normalized by the Classical (CLT) interval.}
+\label{tbl:lmarena_ci}
+\makebox[\textwidth][c]{
+\begin{tabular}{ccccccccc}
+\toprule
+$\alpha$ & & \textbf{Classic} & \textbf{PPI} & \textbf{PPI-P} & \textbf{PPI-NP} & \textbf{UniPT} & \textbf{UniPT-P} & \textbf{UniPT-NP} \\
+\hline
+\multirow{3}{*}{0.01} & coverage  & 96.5\% & 97.9\% & 98.5\% & 95.9\% & 95.8\% & 97.7\% & 93.9\% \\
+& length    & 0.675 & 0.882 & 0.532 & 0.492 & 0.647 & 0.521 & 0.453 \\
+& len-ratio & 1.000 & 1.308 & 0.788 & 0.730 & 0.958 & 0.773 & 0.671 \\
+\hline
+\multirow{3}{*}{0.05} & coverage  & 92.9\% & 93.4\% & 94.4\% & 89.6\% & 91.3\% & 94.5\% & 85.7\% \\
+& length    & 0.513 & 0.671 & 0.405 & 0.372 & 0.492 & 0.397 & 0.341 \\
+& len-ratio & 1.000 & 1.308 & 0.788 & 0.724 & 0.958 & 0.773 & 0.664 \\
+\hline
+\multirow{3}{*}{0.1} & coverage  & 88.4\% & 88.4\% & 89.2\% & 83.5\% & 86.4\% & 90.5\% & 77.7\% \\
+& length    & 0.431 & 0.563 & 0.340 & 0.312 & 0.413 & 0.333 & 0.281 \\
+& len-ratio & 1.000 & 1.308 & 0.788 & 0.725 & 0.958 & 0.773 & 0.653 \\
+\hline
+\multirow{3}{*}{0.2} & coverage  & 79.9\% & 78.8\% & 79.2\% & 72.8\% & 77.4\% & 81.3\% & 64.8\% \\
+& length    & 0.336 & 0.439 & 0.265 & 0.245 & 0.322 & 0.259 & 0.212 \\
+& len-ratio & 1.000 & 1.308 & 0.788 & 0.730 & 0.958 & 0.773 & 0.630 \\
+\hline
+\multirow{3}{*}{0.3} & coverage  & 71.1\% & 69.3\% & 69.2\% & 62.9\% & 68.3\% & 71.4\% & 53.9\% \\
+& length    & 0.272 & 0.355 & 0.214 & 0.199 & 0.260 & 0.210 & 0.167 \\
+& len-ratio & 1.000 & 1.308 & 0.788 & 0.735 & 0.958 & 0.773 & 0.614 \\
+\bottomrule
+\end{tabular}
+}
+\end{table}

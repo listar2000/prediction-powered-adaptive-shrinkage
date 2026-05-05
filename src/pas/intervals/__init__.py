@@ -2,6 +2,18 @@ from pas.intervals.simple_cis import get_mle_cis, get_pred_mean_cis, get_bootstr
 from pas.intervals.ppi_cis import get_vanilla_ppi_cis, get_pt_ppi_cis
 from pas.intervals.eb_cis import get_eb_ppi_cis, get_eb_unipt_ppi_cis
 
+# NPMLE-prior EB CIs require the optional `npmle` extra (npeb + cvxpy + mosek).
+# Imported lazily so that users without the extra installed can still use the
+# rest of the package.
+try:
+    from pas.intervals.eb_npmle_ci import (
+        get_npmle_eb_ppi_cis,
+        get_npmle_eb_unipt_ppi_cis,
+    )
+    _HAS_NPMLE = True
+except ImportError:
+    _HAS_NPMLE = False
+
 __all__ = [
     "get_mle_cis",
     "get_pred_mean_cis",
@@ -21,3 +33,8 @@ CORE_CI_METHODS = {
     "eb_ppi_ci": get_eb_ppi_cis,
     "eb_unipt_ppi_ci": get_eb_unipt_ppi_cis,
 }
+
+if _HAS_NPMLE:
+    __all__ += ["get_npmle_eb_ppi_cis", "get_npmle_eb_unipt_ppi_cis"]
+    CORE_CI_METHODS["eb_npmle_ppi_ci"] = get_npmle_eb_ppi_cis
+    CORE_CI_METHODS["eb_npmle_unipt_ppi_ci"] = get_npmle_eb_unipt_ppi_cis

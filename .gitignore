@@ -88,3 +88,5 @@ __pycache__/
 scripts/*
 data/lmarena/results_skywork/
 tmp/
+
+src/scripts/*.pdf

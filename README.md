@@ -9,21 +9,71 @@
 - You are a **ML practitioner**, such as an NLP researcher, and once you have a good ML model at hand, you would love to see how to perform downstream statistical estimation with its predictions. A good example of this is the popular `LLM-as-ajudge` setting [We will release a notebook on this soon!].
 
 ## Setup and Installation
-1. Please make sure you have `python >= 3.8` installed.
-2. Clone this repository and install the dependencies:
+
+We use [`uv`](https://docs.astral.sh/uv/) for dependency management. Install
+`uv` first if you don't have it (`pip install uv` or follow the
+[official guide](https://docs.astral.sh/uv/getting-started/installation/)).
+
+> **Python:** the project requires `python >= 3.9, < 3.14`. `uv sync` will
+> automatically pick a compatible interpreter.
+
+#### 1. Core install (no NPMLE)
+
 ```bash
 git clone https://github.com/listar2000/prediction-powered-adaptive-shrinkage.git
 cd prediction-powered-adaptive-shrinkage
-pip install -r requirements.txt
+uv sync
 ```
-3. [Optional] If you are only interested in the estimator implementation, you can simply go to the `src/pas/estimators` folder and see all the implementation there (see directory structure below).
 
-4. To test the installation, you can try to run the following demo script:
+This installs the core dependencies (numpy, scipy, pandas, matplotlib,
+seaborn, h5py, tqdm) and gives you everything needed to use the parametric
+EB / PPI / UniPT estimators and confidence intervals.
+
+#### 2. Optional: install with NPMLE support
+
+The nonparametric MLE (NPMLE) prior fitting used by the EB-NPMLE confidence
+intervals (`pas.intervals.eb_npmle_ci`) lives behind an optional
+dependency group called `npmle`. It pulls in
+[`npeb`](https://pypi.org/project/npeb/), [`cvxpy`](https://www.cvxpy.org/),
+and the [Mosek](https://www.mosek.com/) solver.
+
 ```bash
-python src/scripts/run_galaxy_zoo.py
+uv sync --extra npmle
 ```
 
-You should then see a progress bar as we simulate many repeated runs. After that, several metrics for the estimators will be printed out.
+> **Mosek requires a license.** Mosek is a commercial solver, but it offers
+> [free academic licenses](https://www.mosek.com/products/academic-licenses/)
+> (valid for one year, renewable). After requesting a license file, place
+> `mosek.lic` at `~/mosek/mosek.lic` (or set the `MOSEKLM_LICENSE_FILE`
+> environment variable to its path). Without a license, only the
+> non-NPMLE estimators and CIs will work.
+
+If you don't need NPMLE, skip this step — the rest of the codebase works
+without it.
+
+#### 3. Optional: notebook / fine-tuning extras
+
+```bash
+uv sync --extra notebook       # jupyter + ipykernel
+uv sync --extra finetune       # torch + transformers, only for
+                               # reproducing the prediction-model training
+```
+
+Combine extras with `--extra X --extra Y`.
+
+#### 4. [Optional] Just want to read the implementations?
+
+You can browse the code under `src/pas/estimators/` and
+`src/pas/intervals/` directly without installing anything.
+
+#### 5. Smoke-test the install
+
+```bash
+uv run python src/scripts/run_galaxy_zoo.py
+```
+
+You should see a progress bar across many simulated runs followed by
+estimator metrics.
 
 ## Directory Structure
 - `src/`: Contains all source code

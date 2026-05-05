@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "pas"
 version = "0.1.0"
 description = "Prediction-Powered Adaptive Shrinkage Estimation"
-requires-python = ">=3.8"
+requires-python = ">=3.9,<3.14"
 dependencies = [
     "h5py>=3.8",
     "matplotlib>=3.5",
@@ -20,6 +20,11 @@ dependencies = [
 [project.optional-dependencies]
 notebook = ["jupyter", "ipykernel"]
 finetune = ["torch>=2.5", "transformers>=4.45"]
+# Nonparametric MLE prior fitting for the EB-NPMLE confidence intervals.
+# `npeb` solves the NPMLE convex program via cvxpy and currently requires
+# the Mosek backend. Mosek itself is commercial but offers free academic
+# licenses; see the README installation guide for setup instructions.
+npmle = ["npeb>=0.0.2", "cvxpy>=1.4", "mosek>=11"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

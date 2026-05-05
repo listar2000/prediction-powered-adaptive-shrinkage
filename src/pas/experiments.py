@@ -211,6 +211,37 @@ def run_benchmark_timing(dataset: PasDataset,
     return timing_results
 
 
+def _ci_run_chunk(args):
+    """Worker function for parallel CI benchmark.
+
+    Each worker receives a (pickled) dataset and a chunk of trial indices,
+    re-creates a private copy of the dataset, and runs its assigned trials.
+    The mosek/cvxpy modules are re-imported per worker (spawn context), so
+    the MOSEKLM_LICENSE_FILE env var must be set before launching workers.
+    """
+    import copy
+    from pas.intervals import CORE_CI_METHODS
+    dataset, ci_method_names, ci_kwargs, alpha, base_seed, trial_indices = args
+
+    # Each worker mutates its own copy; the parent's dataset is unchanged.
+    dataset = copy.deepcopy(dataset)
+    ci_methods = {k: CORE_CI_METHODS[k] for k in ci_method_names}
+
+    rows = {}
+    for i in trial_indices:
+        dataset.reload_data(split_seed=i + base_seed)
+        true_theta = dataset.true_theta
+        row = {}
+        for ci_name, ci_func in ci_methods.items():
+            kwargs = ci_kwargs.get(ci_name, {}) if ci_kwargs else {}
+            ci = ci_func(dataset, alpha=alpha, **kwargs)
+            row[f"{ci_name}_coverage"] = get_coverage(true_theta, ci)
+            row[f"{ci_name}_width"] = get_avg_ci_width(ci)
+        rows[i] = row
+
+    return rows
+
+
 def run_ci_benchmark(dataset: PasDataset,
                      trials: int = 100,
                      alpha: float = 0.1,
@@ -218,6 +249,7 @@ def run_ci_benchmark(dataset: PasDataset,
                      save_results: bool = False,
                      ci_methods: Optional[dict] = None,
                      ci_kwargs: Optional[dict] = None,
+                     num_workers: int = 1,
                      verbose: bool = True) -> pd.DataFrame:
     """Run benchmark experiments for confidence interval methods on any dataset.
 
@@ -230,6 +262,10 @@ def run_ci_benchmark(dataset: PasDataset,
         ci_methods: Dictionary of CI methods to use. If None, uses CORE_CI_METHODS
         ci_kwargs: Dictionary of keyword arguments to pass to each CI method.
             Each key is a CI method name, and the value is a dictionary of arguments.
+        num_workers: Number of worker processes. 1 means serial (default).
+            With N>1, trials are partitioned across N processes; each gets
+            its own deepcopy of the dataset. The MOSEKLM_LICENSE_FILE env var
+            (and any other env-based config) is inherited from the parent.
 
     Returns:
         DataFrame containing coverage and width results for each CI method across trials
@@ -243,17 +279,41 @@ def run_ci_benchmark(dataset: PasDataset,
     ci_results = pd.DataFrame(columns=col_names)
     base_seed = dataset.split_seed
 
-    for i in tqdm(range(trials), disable=not verbose):
-        dataset.reload_data(split_seed=i + base_seed)
-        true_theta = dataset.true_theta
+    if num_workers <= 1:
+        # Serial path -- preserved for backward compatibility.
+        for i in tqdm(range(trials), disable=not verbose):
+            dataset.reload_data(split_seed=i + base_seed)
+            true_theta = dataset.true_theta
+            for ci_name, ci_func in ci_methods.items():
+                kwargs = ci_kwargs.get(ci_name, {}) if ci_kwargs else {}
+                ci = ci_func(dataset, alpha=alpha, **kwargs)
+                ci_results.loc[i, f"{ci_name}_coverage"] = get_coverage(true_theta, ci)
+                ci_results.loc[i, f"{ci_name}_width"] = get_avg_ci_width(ci)
+    else:
+        # Parallel path: split trials into roughly equal chunks per worker.
+        from concurrent.futures import ProcessPoolExecutor, as_completed
+        import multiprocessing as mp
 
-        for ci_name, ci_func in ci_methods.items():
-            kwargs = ci_kwargs.get(ci_name, {}) if ci_kwargs else {}
-            ci = ci_func(dataset, alpha=alpha, **kwargs)  # shape (M, 2)
-            coverage = get_coverage(true_theta, ci)
-            width = get_avg_ci_width(ci)
-            ci_results.loc[i, f"{ci_name}_coverage"] = coverage
-            ci_results.loc[i, f"{ci_name}_width"] = width
+        ci_method_names = list(ci_methods.keys())
+        chunks = np.array_split(np.arange(trials), num_workers)
+        chunks = [list(map(int, c)) for c in chunks if len(c) > 0]
+
+        ctx = mp.get_context("spawn")  # spawn inherits env vars (mosek lic).
+        with ProcessPoolExecutor(max_workers=num_workers, mp_context=ctx) as pool:
+            futures = [
+                pool.submit(_ci_run_chunk,
+                            (dataset, ci_method_names, ci_kwargs, alpha, base_seed, ch))
+                for ch in chunks
+            ]
+            with tqdm(total=trials, disable=not verbose,
+                      desc=f"alpha={alpha} ({num_workers} workers)") as pbar:
+                for fut in as_completed(futures):
+                    chunk_rows = fut.result()
+                    for i, row in chunk_rows.items():
+                        for col, val in row.items():
+                            ci_results.loc[i, col] = val
+                    pbar.update(len(chunk_rows))
+        ci_results = ci_results.sort_index()
 
     summary_text = [
         f"\nCI Results for {dataset.dataset_name} (alpha={alpha}):\n",
