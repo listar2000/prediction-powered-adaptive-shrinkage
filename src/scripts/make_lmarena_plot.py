@@ -23,13 +23,14 @@ import pandas as pd
 
 
 # Methods to plot, in legend order. Mirrors the paper figure (Classical,
-# Prediction Mean, PPI, Power-Tuned PPI) plus the two PT-based rebiased
-# estimators contributed in this paper.
+# Prediction Mean, Power-Tuned PPI), the Rosenman et al. double-shrinkage
+# baseline, and the two PT-based rebiased estimators contributed here.
 PLOT_METHODS = [
     "mle_ci",
     "pred_mean_ci",
     # "ppi_ci",
     "pt_ci",
+    "double_shrinkage_mle_ci",
     "eb_pt_ci",
     "eb_npmle_pt_ci",
 ]
@@ -39,6 +40,7 @@ METHOD_LABELS = {
     "pred_mean_ci":   "Prediction Mean",
     # "ppi_ci":         "PPI",
     "pt_ci":          "PT",
+    "double_shrinkage_mle_ci": "Double Shrinkage",
     "eb_pt_ci":       "PT Param (ours)",
     "eb_npmle_pt_ci": "PT NPMLE (ours)",
 }
@@ -48,6 +50,7 @@ METHOD_COLORS = {
     "pred_mean_ci":   "#bcbd22",  # olive
     # "ppi_ci":         "#2ca02c",  # green
     "pt_ci":          "#d62728",  # red
+    "double_shrinkage_mle_ci": "#8c564b",  # brown
     "eb_pt_ci":       "#9467bd",  # purple (PT-Param)
     "eb_npmle_pt_ci": "#e377c2",  # pink   (PT-NPMLE)
 }
@@ -57,6 +60,7 @@ METHOD_MARKERS = {
     "pred_mean_ci":   "v",
     # "ppi_ci":         "s",
     "pt_ci":          "D",
+    "double_shrinkage_mle_ci": "X",
     "eb_pt_ci":       "P",
     "eb_npmle_pt_ci": "*",
 }
@@ -151,11 +155,11 @@ def make_plot(summary_df: pd.DataFrame, alphas, out_path: Path):
 
 def main():
     parser = argparse.ArgumentParser()
-    default = Path("/tmp/lmarena_ci_results")
+    default = Path("/Users/starli/Documents/prediction-powered-adaptive-shrinkage/tmp/lmarena_ci_results")
     parser.add_argument("--in-dir", type=Path,
                         default=default)
     parser.add_argument("--out", type=Path,
-                        default=default / "lmarena_ci_plot.pdf")
+                        default=default / "lmarena_ci_plot_v2.pdf")
     args = parser.parse_args()
 
     raw = pd.read_csv(args.in_dir / "raw.csv")

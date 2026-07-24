@@ -52,8 +52,14 @@ RUN_METHODS = [
     "pred_mean_ci",      # Prediction Mean
     "ppi_ci",            # Vanilla PPI
     "pt_ci",             # Power-Tuned PPI baseline
+    "double_shrinkage_mle_ci",  # Rosenman et al. (2023), robust EBCI
     "eb_pt_ci",          # PT-Param  (ours)
     "eb_npmle_pt_ci",    # PT-NPMLE  (ours)
+    # Other double-shrinkage hyperparameter variants / rebiased flavours
+    # kept for ablations; uncomment to enable:
+    # "double_shrinkage_mm1_ci",
+    # "double_shrinkage_mm2_ci",
+    # "double_shrinkage_ure_ci",
     # "eb_ppi_ci",             # PPI-Param   (older PPI-flavored variant)
     # "eb_npmle_ppi_ci",       # PPI-NPMLE
     # "eb_unipt_ppi_ci",       # UniPT-Param
@@ -104,7 +110,17 @@ def main():
             "Run `uv sync --extra npmle` and set MOSEKLM_LICENSE_FILE."
         )
     ci_methods = {k: CORE_CI_METHODS[k] for k in RUN_METHODS}
-    ci_kwargs = {"pt_ci": {"share_var": False}}
+    ci_kwargs = {
+        "pt_ci": {"share_var": False},
+        # The double-shrinkage prior shrinks the target toward a fixed center.
+        # For a pairwise win probability, 0.5 is the natural no-preference
+        # center.
+        "double_shrinkage_mle_ci": {
+            "center": 0.5,
+            "finite_sample_correction": "pmt",
+            "cv_mode": "lookup",
+        },
+    }
 
     raw_frames = []
     for alpha in args.alphas:

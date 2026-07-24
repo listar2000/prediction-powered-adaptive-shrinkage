@@ -5,6 +5,13 @@ from pas.intervals.eb_cis import (
     get_eb_unipt_ppi_cis,
     get_eb_power_tuned_cis,
 )
+from pas.intervals.double_shrinkage_cis import (
+    get_double_shrinkage_cis,
+    get_double_shrinkage_mm1_cis,
+    get_double_shrinkage_mm2_cis,
+    get_double_shrinkage_mle_cis,
+    get_double_shrinkage_ure_cis,
+)
 
 # NPMLE-prior EB CIs require the optional `npmle` extra (npeb + cvxpy + mosek).
 # Imported lazily so that users without the extra installed can still use the
@@ -28,6 +35,11 @@ __all__ = [
     "get_eb_ppi_cis",
     "get_eb_unipt_ppi_cis",
     "get_eb_power_tuned_cis",
+    "get_double_shrinkage_cis",
+    "get_double_shrinkage_mm1_cis",
+    "get_double_shrinkage_mm2_cis",
+    "get_double_shrinkage_mle_cis",
+    "get_double_shrinkage_ure_cis",
 ]
 
 CORE_CI_METHODS = {
@@ -39,6 +51,11 @@ CORE_CI_METHODS = {
     "eb_ppi_ci": get_eb_ppi_cis,
     "eb_unipt_ppi_ci": get_eb_unipt_ppi_cis,
     "eb_pt_ci": get_eb_power_tuned_cis,
+    # Rosenman--Dominici--Miratrix (2023) double-shrinkage robust EBCIs.
+    "double_shrinkage_mm1_ci": get_double_shrinkage_mm1_cis,
+    "double_shrinkage_mm2_ci": get_double_shrinkage_mm2_cis,
+    "double_shrinkage_mle_ci": get_double_shrinkage_mle_cis,
+    "double_shrinkage_ure_ci": get_double_shrinkage_ure_cis,
 }
 
 if _HAS_NPMLE:

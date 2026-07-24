@@ -83,10 +83,13 @@ estimator metrics.
       - `ppi_estimators.py`: PPI estimators
       - `simple_estimators.py`: Basic statistical estimators
       - `uni_pas_estimators.py`: Univariate PAS estimators
+      - `double_shrinkage.py`: Empirical-Bayes double-shrinkage baseline [[Rosenman et al. 2023]](https://arxiv.org/abs/2309.06727)
       - `legacy_estimators.py`: Legacy estimators (do not use)
     - `intervals/`: Directory containing confidence interval implementations
       - `simple_cis.py`: Classical CLT-based confidence intervals
       - `ppi_cis.py`: PPI and power-tuned PPI confidence intervals
+      - `double_shrinkage_cis.py`: Robust EB intervals for double shrinkage (see `docs/double_shrinkage_implementation_note.md`)
+      - `robust_eb.py`: Robust EBCI critical values, ported from [`ebci`](https://github.com/kolesarm/ebci) (see `THIRD_PARTY_NOTICES.md`)
     - `experiments.py`: Experiment configurations and setup
     - `utils.py`: Utility functions
     - `datasets/`: Directory for dataset-specific code

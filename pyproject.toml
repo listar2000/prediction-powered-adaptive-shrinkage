@@ -30,4 +30,4 @@ npmle = ["npeb>=0.0.2", "cvxpy>=1.4", "mosek>=11"]
 where = ["src"]
 
 [tool.setuptools.package-data]
-"*" = ["*.csv", "*.h5"]
+"*" = ["*.csv", "*.h5", "*.npz"]

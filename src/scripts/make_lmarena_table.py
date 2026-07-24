@@ -4,7 +4,7 @@ Loads `raw.csv` produced by `run_lmarena_ci.py` and emits a LaTeX table
 matching the column layout of `tbl:synthetic_amazon` in the paper appendix
 (minus Oracle, since LMArena has no oracle).
 
-Columns: Classic, PredMean, PPI, PT, PT-P, PT-NP.
+Columns: Classic, PredMean, PPI, PT, DoubleShrink, PT-P, PT-NP.
 Rows: per alpha, three metrics -- coverage (%), length, length-ratio (vs Classic).
 Each cell is reported as ``mean $\\pm$ 1 Monte-Carlo SE'' over the random
 labeled/unlabeled splits.
@@ -27,6 +27,7 @@ TABLE_COLUMNS = [
     ("PredMean", "pred_mean_ci"),
     ("PPI",      "ppi_ci"),
     ("PT",       "pt_ci"),
+    ("DoubleShrink", "double_shrinkage_mle_ci"),
     ("PT-P",     "eb_pt_ci"),
     ("PT-NP",    "eb_npmle_pt_ci"),
 ]
@@ -90,7 +91,8 @@ def make_latex_table(raw: pd.DataFrame) -> str:
         "averaged over 200 random labeled/unlabeled splits with $n=298$ pairwise "
         "LLM problems. Each cell reports mean $\\pm$ 1 Monte-Carlo SE. "
         "PredMean is the prediction-only interval; PT denotes the power-tuned "
-        "PPI baseline; PT-P and PT-NP are the rebiased PT estimators with "
+        "PPI baseline; DoubleShrink is the MLE double-shrinkage robust EBCI "
+        "of Rosenman et al.; PT-P and PT-NP are the rebiased PT estimators with "
         "parametric (Gaussian) and NPMLE bias priors. Length-ratio is normalized "
         "by the Classical (CLT) interval.}",
         "\\label{tbl:lmarena_ci}",
