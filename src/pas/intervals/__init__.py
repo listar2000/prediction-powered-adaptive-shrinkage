@@ -5,6 +5,7 @@ from pas.intervals.eb_cis import (
     get_eb_unipt_ppi_cis,
     get_eb_power_tuned_cis,
 )
+from pas.intervals.robust_eb_cis import get_robust_eb_cis
 from pas.intervals.double_shrinkage_cis import (
     get_double_shrinkage_cis,
     get_double_shrinkage_mm1_cis,
@@ -35,6 +36,7 @@ __all__ = [
     "get_eb_ppi_cis",
     "get_eb_unipt_ppi_cis",
     "get_eb_power_tuned_cis",
+    "get_robust_eb_cis",
     "get_double_shrinkage_cis",
     "get_double_shrinkage_mm1_cis",
     "get_double_shrinkage_mm2_cis",
@@ -51,6 +53,8 @@ CORE_CI_METHODS = {
     "eb_ppi_ci": get_eb_ppi_cis,
     "eb_unipt_ppi_ci": get_eb_unipt_ppi_cis,
     "eb_pt_ci": get_eb_power_tuned_cis,
+    # Armstrong--Kolesar--Plagborg-Moller robust EBCI on unbiased PT.
+    "robust_eb_ci": get_robust_eb_cis,
     # Rosenman--Dominici--Miratrix (2023) double-shrinkage robust EBCIs.
     "double_shrinkage_mm1_ci": get_double_shrinkage_mm1_cis,
     "double_shrinkage_mm2_ci": get_double_shrinkage_mm2_cis,

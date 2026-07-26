@@ -42,6 +42,7 @@ from pas.intervals import CORE_CI_METHODS
 #   - Prediction Mean     : pred_mean_ci
 #   - PPI                 : ppi_ci
 #   - PT                  : pt_ci  (power-tuned PPI baseline)
+#   - Robust EB           : robust_eb_ci (Armstrong et al., applied to PT)
 #   - PT-Param  (ours)    : eb_pt_ci
 #   - PT-NPMLE  (ours)    : eb_npmle_pt_ci
 #
@@ -52,6 +53,7 @@ RUN_METHODS = [
     "pred_mean_ci",      # Prediction Mean
     "ppi_ci",            # Vanilla PPI
     "pt_ci",             # Power-Tuned PPI baseline
+    "robust_eb_ci",      # Armstrong et al. robust EBCI on unbiased PT
     "double_shrinkage_mle_ci",  # Rosenman et al. (2023), robust EBCI
     "eb_pt_ci",          # PT-Param  (ours)
     "eb_npmle_pt_ci",    # PT-NPMLE  (ours)
@@ -94,11 +96,20 @@ def main():
                         help="Number of worker processes (default 4).")
     parser.add_argument("--out-dir", type=Path,
                         default=Path("/tmp/lmarena_ci_results"))
+    parser.add_argument("--csv", type=Path, default=None,
+                        help="LMArena cleaned CSV; defaults to DATA_PATHS. "
+                             "Use clean_summary_v2.csv for the Bradley-Terry "
+                             "probability artifact.")
     args = parser.parse_args()
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
-    dataset = LMArenaDataset(train_test_split=args.train_test_split)
+    dataset = (
+        LMArenaDataset(file_path=args.csv, train_test_split=args.train_test_split)
+        if args.csv is not None
+        else LMArenaDataset(train_test_split=args.train_test_split)
+    )
+    print(f"LMArena source: {dataset.file_path}")
     print(f"LMArena: M={dataset.M} problems, "
           f"n=[{dataset.ns.min()},{dataset.ns.max()}], "
           f"N=[{dataset.Ns.min()},{dataset.Ns.max()}]")
@@ -112,13 +123,30 @@ def main():
     ci_methods = {k: CORE_CI_METHODS[k] for k in RUN_METHODS}
     ci_kwargs = {
         "pt_ci": {"share_var": False},
+        # Match ebci(Y ~ 1, se=se, weights=1/se^2,
+        #            fs_correction="PMT") using PT as the unbiased Y.
+        #
+        # `cv_mode="exact"` solves cva() per task exactly as ebci() does. The
+        # packaged lookup tables round m2 (and kappa) *up*, which would widen
+        # these two competitor baselines by ~1% on average (up to ~2.4% for
+        # robust EB) relative to their true intervals -- a systematic bias in
+        # our own favour. Exact mode costs ~12s per replicate, which is small
+        # next to the NPMLE method, so we pay it.
+        "robust_eb_ci": {
+            "base_estimator": "pt",
+            "share_var": False,
+            "weights": "inverse_variance",
+            "shrink_to": "grand_mean",
+            "fs_correction": "PMT",
+            "cv_mode": "exact",
+        },
         # The double-shrinkage prior shrinks the target toward a fixed center.
         # For a pairwise win probability, 0.5 is the natural no-preference
         # center.
         "double_shrinkage_mle_ci": {
             "center": 0.5,
             "finite_sample_correction": "pmt",
-            "cv_mode": "lookup",
+            "cv_mode": "exact",
         },
     }
 
@@ -149,6 +177,7 @@ def main():
     print(summary.round(4).to_string(index=False))
 
     meta = {
+        "csv": str(dataset.file_path),
         "trials": args.trials,
         "alphas": list(args.alphas),
         "train_test_split": args.train_test_split,

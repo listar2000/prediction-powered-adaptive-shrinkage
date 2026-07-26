@@ -84,12 +84,18 @@ estimator metrics.
       - `simple_estimators.py`: Basic statistical estimators
       - `uni_pas_estimators.py`: Univariate PAS estimators
       - `double_shrinkage.py`: Empirical-Bayes double-shrinkage baseline [[Rosenman et al. 2023]](https://arxiv.org/abs/2309.06727)
+      - `robust_eb.py`: Robust empirical-Bayes shrinkage of an unbiased estimator [[Armstrong et al. 2022]](https://doi.org/10.3982/ECTA18597)
       - `legacy_estimators.py`: Legacy estimators (do not use)
     - `intervals/`: Directory containing confidence interval implementations
       - `simple_cis.py`: Classical CLT-based confidence intervals
       - `ppi_cis.py`: PPI and power-tuned PPI confidence intervals
       - `double_shrinkage_cis.py`: Robust EB intervals for double shrinkage (see `docs/double_shrinkage_implementation_note.md`)
-      - `robust_eb.py`: Robust EBCI critical values, ported from [`ebci`](https://github.com/kolesarm/ebci) (see `THIRD_PARTY_NOTICES.md`)
+      - `robust_eb_cis.py`: Robust EBCIs on the unbiased PT estimator (see `docs/robust_ebci_implementation_note.md`)
+      - `robust_eb.py`: Robust EBCI critical values `cva(m2, kappa)`, ported from [`ebci`](https://github.com/kolesarm/ebci) (see `THIRD_PARTY_NOTICES.md`)
+    - `statistical_tests/`: Diagnostics registry, parallel to the estimator/CI registries
+      - `base.py`: `StatisticalTest` protocol and `StatisticalTestResult`
+      - `exchangeability.py`: Pseudo-oracle test for target-dependent bias (see `docs/exchangeability_diagnostic_note.md`)
+      - `plotting.py`: Permutation-null and three-panel diagnostic figures
     - `experiments.py`: Experiment configurations and setup
     - `utils.py`: Utility functions
     - `datasets/`: Directory for dataset-specific code
@@ -214,6 +220,22 @@ Each CI method takes a `PasDataset` and returns an `(M, 2)` numpy array, where e
 
 - `src/pas/intervals/simple_cis.py`: Classical CLT-based CI (`get_mle_cis`)
 - `src/pas/intervals/ppi_cis.py`: Vanilla PPI CI (`get_vanilla_ppi_cis`) and power-tuned PPI CI (`get_pt_ppi_cis`) [[Angelopoulos et al. 2024]](https://arxiv.org/abs/2311.01453)
+- `src/pas/intervals/robust_eb_cis.py`: Robust EBCI (`get_robust_eb_cis`) shrinking the unbiased PT estimator toward its weighted grand mean [[Armstrong et al. 2022]](https://doi.org/10.3982/ECTA18597)
+- `src/pas/intervals/double_shrinkage_cis.py`: Double-shrinkage robust EBCIs (`get_double_shrinkage_{mm1,mm2,mle,ure}_cis`) [[Rosenman et al. 2023]](https://arxiv.org/abs/2309.06727)
+
+#### Diagnostics
+
+`src/pas/statistical_tests/` holds diagnostics that follow the same registry pattern as estimators and CIs. Each returns a `StatisticalTestResult` with a statistic, permutation p-value, effect size, and JSON-serializable metadata:
+
+```python
+from pas.statistical_tests import load_lmarena_pseudo_oracle, run_statistical_test
+
+summary = load_lmarena_pseudo_oracle("data/lmarena/clean_data/clean_summary_v2.csv")
+result = run_statistical_test("bias_exchangeability_by_target", summary)
+print(result.format())
+```
+
+See `docs/exchangeability_diagnostic_note.md` for what the test does and how to read it.
 
 #### Benchmarking CIs
 

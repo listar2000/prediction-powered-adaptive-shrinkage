@@ -4,6 +4,7 @@ from pas.estimators.pas_estimators import get_shrinkage_only_estimators, get_pas
 from pas.estimators.uni_pas_estimators import get_uni_pt_estimators, get_uni_pas_estimators
 from pas.estimators.eb_estimators import get_eb_ppi_estimators, get_eb_unipt_ppi_estimators
 from pas.estimators.double_shrinkage import get_double_shrinkage_estimators
+from pas.estimators.robust_eb import get_robust_eb_estimators
 
 __all__ = [
     "get_mle_estimators",
@@ -18,6 +19,7 @@ __all__ = [
     "get_eb_ppi_estimators",
     "get_eb_unipt_ppi_estimators",
     "get_double_shrinkage_estimators",
+    "get_robust_eb_estimators",
 ]
 
 
@@ -39,4 +41,5 @@ ALL_ESTIMATORS = {
     "eb_ppi": get_eb_ppi_estimators,
     "eb_unipt_ppi": get_eb_unipt_ppi_estimators,
     "double_shrinkage": get_double_shrinkage_estimators,
+    "robust_eb": get_robust_eb_estimators,
 }

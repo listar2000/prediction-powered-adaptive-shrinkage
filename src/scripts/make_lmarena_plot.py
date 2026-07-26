@@ -23,13 +23,14 @@ import pandas as pd
 
 
 # Methods to plot, in legend order. Mirrors the paper figure (Classical,
-# Prediction Mean, Power-Tuned PPI), the Rosenman et al. double-shrinkage
-# baseline, and the two PT-based rebiased estimators contributed here.
+# Prediction Mean, Power-Tuned PPI), robust EB and double-shrinkage
+# baselines, and the two PT-based rebiased estimators contributed here.
 PLOT_METHODS = [
     "mle_ci",
     "pred_mean_ci",
     # "ppi_ci",
     "pt_ci",
+    "robust_eb_ci",
     "double_shrinkage_mle_ci",
     "eb_pt_ci",
     "eb_npmle_pt_ci",
@@ -40,6 +41,7 @@ METHOD_LABELS = {
     "pred_mean_ci":   "Prediction Mean",
     # "ppi_ci":         "PPI",
     "pt_ci":          "PT",
+    "robust_eb_ci":   "Robust EB",
     "double_shrinkage_mle_ci": "Double Shrinkage",
     "eb_pt_ci":       "PT Param (ours)",
     "eb_npmle_pt_ci": "PT NPMLE (ours)",
@@ -50,6 +52,7 @@ METHOD_COLORS = {
     "pred_mean_ci":   "#bcbd22",  # olive
     # "ppi_ci":         "#2ca02c",  # green
     "pt_ci":          "#d62728",  # red
+    "robust_eb_ci":   "#7f7f7f",  # gray
     "double_shrinkage_mle_ci": "#8c564b",  # brown
     "eb_pt_ci":       "#9467bd",  # purple (PT-Param)
     "eb_npmle_pt_ci": "#e377c2",  # pink   (PT-NPMLE)
@@ -60,6 +63,7 @@ METHOD_MARKERS = {
     "pred_mean_ci":   "v",
     # "ppi_ci":         "s",
     "pt_ci":          "D",
+    "robust_eb_ci":   "^",
     "double_shrinkage_mle_ci": "X",
     "eb_pt_ci":       "P",
     "eb_npmle_pt_ci": "*",
@@ -89,7 +93,7 @@ def summarize(raw: pd.DataFrame) -> pd.DataFrame:
 
 
 def make_plot(summary_df: pd.DataFrame, alphas, out_path: Path):
-    fig, axes = plt.subplots(1, 2, figsize=(6.2, 2.6))
+    fig, axes = plt.subplots(1, 2, figsize=(7.4, 2.8))
 
     # --- Left panel: CI Width vs Alpha ---
     ax = axes[0]
@@ -143,8 +147,8 @@ def make_plot(summary_df: pd.DataFrame, alphas, out_path: Path):
     handles.append(nominal_handle)
     labels.append(r"Nominal $\alpha$")
     fig.legend(
-        handles, labels, loc="upper center", ncol=len(handles),
-        fontsize=8, bbox_to_anchor=(0.5, 1.04), frameon=False,
+        handles, labels, loc="upper center", ncol=4,
+        fontsize=8, bbox_to_anchor=(0.5, 1.12), frameon=False,
         handletextpad=0.4, columnspacing=1.0,
     )
 
@@ -155,7 +159,7 @@ def make_plot(summary_df: pd.DataFrame, alphas, out_path: Path):
 
 def main():
     parser = argparse.ArgumentParser()
-    default = Path("/Users/starli/Documents/prediction-powered-adaptive-shrinkage/tmp/lmarena_ci_results")
+    default = Path(__file__).resolve().parents[2] / "tmp" / "lmarena_ci_results"
     parser.add_argument("--in-dir", type=Path,
                         default=default)
     parser.add_argument("--out", type=Path,
