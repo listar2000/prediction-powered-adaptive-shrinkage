@@ -46,8 +46,9 @@ def get_vanilla_ppi_cis(data: PasDataset, alpha: float = 0.1,
 
 def get_pt_ppi_cis(data: PasDataset, alpha: float = 0.1,
                    alternative: str = "two-sided",
-                   share_var: bool = False,
-                   clip_lambda: bool = True) -> np.ndarray:
+                   share_var=None,
+                   clip_lambda: bool = True,
+                   *, moments=None) -> np.ndarray:
     """Power-tuned PPI confidence interval for each problem's mean.
 
     Uses the power-tuning parameter lambda_i from get_pt_ppi_estimators to
@@ -63,8 +64,9 @@ def get_pt_ppi_cis(data: PasDataset, alpha: float = 0.1,
         data: Dataset with M problems.
         alpha: Error level; targets 1-alpha coverage. Default 0.1 (90% CI).
         alternative: "two-sided", "larger", or "smaller".
-        share_var: Whether to share variance/covariance across problems for lambda tuning.
-            Default False (per-problem), matching get_pt_ppi_estimators.
+        share_var: Deprecated alias for `moments`; False -> "per_problem", True -> "pooled".
+        moments: Which second-moment plug-in to build lambda_i from. Default
+            "per_problem", matching get_pt_ppi_estimators.
         clip_lambda: Whether to clip each lambda_i to [0, 1]. Default True; see
             get_pt_ppi_estimators for why.
 
@@ -76,7 +78,8 @@ def get_pt_ppi_cis(data: PasDataset, alpha: float = 0.1,
             "PPI++: Efficient Prediction-Powered Inference".
     """
     pt_estimates, lambdas = get_pt_ppi_estimators(
-        data, share_var=share_var, get_lambdas=True, clip_lambda=clip_lambda)
+        data, share_var=share_var, moments=moments, get_lambdas=True,
+        clip_lambda=clip_lambda)
 
     imputed_ses = np.array([
         (lam * pred_u).std(ddof=1) / np.sqrt(N)

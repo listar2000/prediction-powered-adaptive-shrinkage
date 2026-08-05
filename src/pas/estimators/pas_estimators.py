@@ -12,7 +12,8 @@ from pas.estimators.ppi_estimators import (
 )
 
 
-def get_shrinkage_only_estimators(data: PasDataset, get_lambdas: bool = False, share_var: bool = False, cutoff: float = 0.999) \
+def get_shrinkage_only_estimators(data: PasDataset, get_lambdas: bool = False, share_var=None, cutoff: float = 0.999,
+                                  *, moments=None) \
         -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
     """ Obtain the SURE-minimizing shrinkage estimator for the problem. No PPI is done, only the second stage.
 
@@ -28,9 +29,12 @@ def get_shrinkage_only_estimators(data: PasDataset, get_lambdas: bool = False, s
 
         get_lambdas (bool): whether to return the shrinkage factor λ_i. Default to `False`.
 
-        share_var (bool): whether to consider a single global variance (across products) for all problems. If `True`, a \
-            global variance will be first computed based on the concatenation of all the observed Y_i, \
-            and then divided by the n_i to get A_i for each problem. Default to `False`.
+        share_var (bool): deprecated alias for `moments`; `False` -> `"per_problem"`, `True` -> `"pooled"`.
+
+        moments (str): which second-moment plug-in to use -- one of \
+            `ppi_estimators.MOMENT_ESTIMATORS`. Default `"per_problem"` (Appendix C.1), which is the \
+            configuration behind the paper's tables. The paper assumes these moments known for this \
+            estimator, so the choice is not specified by it.
 
         cutoff (float): the cutoff value for the maximum value of λ_i. This is an *ad-hoc* way of restraining the search space \
             for the optimal λ since λ_i = λ^* / (A_i + λ^*), i.e. we can calculate the upper bound of λ^* based on the \
@@ -47,10 +51,9 @@ def get_shrinkage_only_estimators(data: PasDataset, get_lambdas: bool = False, s
     f_x_tilde_bar = np.array([data.pred_unlabelled[i].mean() for i in range(data.M)])
     y_bar = np.array([data.y_labelled[i].mean() for i in range(data.M)])
 
-    # A_j = Var(Ybar_j) = sigma_hat_j^2 / n_j. `share_var=True` pools the
-    # sigma_hat_j^2 across problems, `False` keeps them per-problem -- the same
-    # convention as `get_pt_ppi_estimators`. This branch used to be inverted.
-    var_y, _, _ = estimate_second_moments(data, share_var)
+    # A_j = Var(Ybar_j) = sigma_hat_j^2 / n_j, with the sigma_hat_j^2 supplied by
+    # the chosen plug-in -- the same convention as `get_pt_ppi_estimators`.
+    var_y, _, _ = estimate_second_moments(data, moments=moments, share_var=share_var)
     var_y = np.maximum(var_y / data.ns, MIN_PT_VARIANCE)
 
     def sure_fn(lambda_: float) -> float:
@@ -68,8 +71,8 @@ def get_shrinkage_only_estimators(data: PasDataset, get_lambdas: bool = False, s
     return sure_estimates if not get_lambdas else (sure_estimates, lambdas)
 
 
-def get_pas_estimators(data: PasDataset, get_lambdas: bool = False, get_omegas: bool = False, share_var: bool = False,
-                       cutoff: float = 0.999, clip_lambda: bool = True):
+def get_pas_estimators(data: PasDataset, get_lambdas: bool = False, get_omegas: bool = False, share_var=None,
+                       cutoff: float = 0.999, clip_lambda: bool = True, *, moments=None):
     """
     The very core `PAS` estimator mentioned in the paper. It adopts a two-stage estimation procedure:
 
@@ -80,9 +83,12 @@ def get_pas_estimators(data: PasDataset, get_lambdas: bool = False, get_omegas: 
         data (PasDataset): the dataset object.
         get_lambdas (bool): whether to return the shrinkage factor λ_i. Default to `False`.
         get_omegas (bool): whether to return the power-tuning parameter ω_i. Default to `False`.
-        share_var (bool): whether to consider a single global variance (across products) for all problems. If `True`, a \
-            global variance will be first computed based on the concatenation of all the observed Y_i, \
-            and then divided by the n_i to get A_i for each problem. Default to `False`.
+        share_var (bool): deprecated alias for `moments`; `False` -> `"per_problem"`, `True` -> `"pooled"`.
+
+        moments (str): which second-moment plug-in to use -- one of \
+            `ppi_estimators.MOMENT_ESTIMATORS`. Default `"per_problem"` (Appendix C.1), which is the \
+            configuration behind the paper's tables. The paper assumes these moments known for this \
+            estimator, so the choice is not specified by it.
 
         cutoff (float): the cutoff value for the maximum value of λ_i. This is an *ad-hoc* way of restraining the search space \
             for the optimal λ since λ_i = λ^* / (A_i + λ^*), i.e. we can calculate the upper bound of λ^* based on the \
@@ -95,12 +101,11 @@ def get_pas_estimators(data: PasDataset, get_lambdas: bool = False, get_omegas: 
     f_x_bar = np.array([data.pred_unlabelled[i].mean() for i in range(data.M)])
 
     pt_ppi_estimates, sure_lambdas = get_pt_ppi_estimators(
-        data, get_lambdas=True, share_var=share_var, clip_lambda=clip_lambda)
+        data, get_lambdas=True, share_var=share_var, moments=moments, clip_lambda=clip_lambda)
 
-    # `share_var` now reaches the second moments as well, not just the PT
-    # lambdas: previously these were always pooled, so `share_var=False` mixed
-    # per-problem lambdas with pooled moments.
-    var_y, var_f_x, cov_y_f_x = estimate_second_moments(data, share_var)
+    # The moment choice reaches the second moments as well, not just the PT
+    # lambdas: these used to be pooled unconditionally.
+    var_y, var_f_x, cov_y_f_x = estimate_second_moments(data, moments=moments, share_var=share_var)
 
     var_y = var_y / data.ns
     cov_y_f_x = cov_y_f_x / data.ns
@@ -139,26 +144,26 @@ def get_pas_estimators(data: PasDataset, get_lambdas: bool = False, get_omegas: 
         return sure_estimates, sure_lambdas, omegas
 
 
-def get_shrinkage_to_mean_estimators(data: PasDataset, get_lambdas: bool = False, get_omegas: bool = False, share_var: bool = False,
-                                     cutoff: float = 0.999, clip_lambda: bool = True):
+def get_shrinkage_to_mean_estimators(data: PasDataset, get_lambdas: bool = False, get_omegas: bool = False, share_var=None,
+                                     cutoff: float = 0.999, clip_lambda: bool = True, *, moments=None):
     """
     PT-PPI estimator but shrink towards the average (grand mean) of the estimators themselves (across all m problems).
 
     Implements Eq. (29) / Algorithm 4 ("shrink-average"): the shrinkage target
     is θ̄^PT = m⁻¹ Σ_j θ̂_j^PT, the grand mean of the power-tuned estimates.
 
-    `share_var` and `clip_lambda` carry the same meaning as in
+    `moments` / `share_var` and `clip_lambda` carry the same meaning as in
     `get_pt_ppi_estimators`, which computes the first-stage estimates.
 
     References:
         [1] X. Xie, S. C. Kou, and L. D. Brown, “SURE Estimates for a Heteroscedastic Hierarchical Model”.
     """
     pt_ppi_estimates, sure_lambdas = get_pt_ppi_estimators(
-        data, get_lambdas=True, share_var=share_var, clip_lambda=clip_lambda)
+        data, get_lambdas=True, share_var=share_var, moments=moments, clip_lambda=clip_lambda)
 
-    # `share_var` now reaches the second moments as well, not just the PT
-    # lambdas (previously these were always pooled).
-    var_y, var_f_x, cov_y_f_x = estimate_second_moments(data, share_var)
+    # The moment choice reaches the second moments as well, not just the PT
+    # lambdas (these used to be pooled unconditionally).
+    var_y, var_f_x, cov_y_f_x = estimate_second_moments(data, moments=moments, share_var=share_var)
 
     var_y = var_y / data.ns
     cov_y_f_x = cov_y_f_x / data.ns

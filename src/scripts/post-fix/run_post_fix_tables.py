@@ -1,30 +1,29 @@
-"""Post-fix reproduction of Table 3 of the PAS paper (share_var off and on).
+"""Post-fix reproduction of Tables 2 and 3 of the PAS paper.
 
-Re-runs the paper's real-data benchmark after the estimator/dataset corrections
-described in ``README.md`` in this directory. Results are NOT comparable
-row-for-row with the published table: the pseudo-ground-truth fix changes the
-estimand, which rescales every MSE (see the README).
+Re-runs the paper's benchmarks after the code corrections described in
+``README.md`` in this directory.
 
+- **Table 3** (real data): nine estimator rows x three dataset columns (Amazon
+  ``BERT-base``, Amazon ``BERT-tuned``, Galaxy), K = 200 replicates at the
+  default split seed -- the configuration of Appendix E.4. Results are NOT
+  comparable row-for-row with the published table: the pseudo-ground-truth fix
+  changes the estimand, so every estimator is evaluated against a different
+  target (see the README).
+- **Table 2** (synthetic): seven estimator rows x two predictors
+  (f1(x) = x^2, f2(x) = |x|), m = 200, n_j = 20, N_j = 80. Second moments are
+  known in closed form here, so this table is directly comparable with the
+  published one.
 
-Nine estimator rows (Classical ... UniPAS) x three dataset columns (Amazon
-``BERT-base``, Amazon ``BERT-tuned``, Galaxy), K = 200 replicates at the default
-split seed -- the configuration described in Appendix E.4.
-
-Each (dataset, share_var) cell is an independent job, so the six jobs run in
-parallel subprocesses. Datasets are constructed inside the worker rather than
-pickled across the process boundary.
-
-``share_var`` reaches only the estimators whose signature accepts it (PT,
-Shrink Classical, Shrink Avg, PAS). Classical / Prediction Avg / PPI have no
-second-moment estimate to share, and UniPT / UniPAS deliberately do not take the
-flag -- the paper notes that sharing variance is not meaningful once a single
-global lambda is used. Those five rows are therefore identical across the two
-runs, which doubles as a consistency check on the parallel harness.
+Every cell uses per-problem second moments (Appendix C.1), which the tables
+report as ``share_var=False`` -- the configuration behind the paper's numbers.
+Each dataset is an independent job, so they run in parallel subprocesses;
+datasets are constructed inside the worker rather than pickled across the
+process boundary.
 
 Usage::
 
-    uv run python src/scripts/run_pas_paper_tables.py
-    uv run python src/scripts/run_pas_paper_tables.py --trials 5 --num-workers 2
+    uv run python src/scripts/post-fix/run_post_fix_tables.py
+    uv run python src/scripts/post-fix/run_post_fix_tables.py --trials 5 --num-workers 2
 """
 from __future__ import annotations
 
@@ -37,14 +36,18 @@ import warnings
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 HERE = Path(__file__).resolve().parent
 
-# (paper row label, registry key)
+#: The second-moment plug-in used for every cell. ``share_var=False`` is the
+#: historical spelling of this and is what the table captions report.
+MOMENTS = "per_problem"
+
+# (paper row label, registry key). `mle` must come first: `run_benchmark`
+# measures "% Improved" against it.
 ROWS = [
     ("Classical", "mle"),
     ("Prediction Avg", "pred_mean"),
@@ -57,11 +60,21 @@ ROWS = [
     ("UniPAS (ours)", "uni_pas"),
 ]
 
-DATASET_LABELS = {
+# Table 2 omits UniPT/UniPAS: the paper includes them "only for the real-world
+# experiments, as they are specifically designed for settings where the second
+# moments are unknown".
+SYNTHETIC_ROWS = [row for row in ROWS if row[1] not in {"uni_pt", "uni_pas"}]
+
+REAL_DATASETS = {
     "amazon_base": "Amazon (base f)",
     "amazon_tuned": "Amazon (tuned f)",
     "galaxy": "Galaxy",
 }
+SYNTHETIC_DATASETS = {
+    "synthetic_f1": "Synthetic f1=x^2",
+    "synthetic_f2": "Synthetic f2=|x|",
+}
+DATASET_LABELS = {**REAL_DATASETS, **SYNTHETIC_DATASETS}
 
 # Published Table 3, as (mse_mean, mse_se, improved_mean, improved_se).
 # `None` for the Classical baseline's "% Improved" cell.
@@ -101,11 +114,29 @@ PUBLISHED = {
     },
 }
 
+# Published Table 2 (synthetic), as (mse_mean, mse_se). The paper reports no
+# "% Improved" column for the synthetic study.
+PUBLISHED_SYNTHETIC = {
+    "synthetic_f1": {
+        "mle": (3.142, 0.033), "pred_mean": (0.273, 0.004),
+        "ppi": (2.689, 0.027), "pt": (2.642, 0.027),
+        "shrinkage_only": (0.272, 0.003), "shrinkage_mean": (2.486, 0.026),
+        "pas": (0.272, 0.003),
+    },
+    "synthetic_f2": {
+        "mle": (3.142, 0.033), "pred_mean": (34.335, 0.147),
+        "ppi": (2.756, 0.027), "pt": (2.659, 0.026),
+        "shrinkage_only": (2.863, 0.030), "shrinkage_mean": (2.537, 0.026),
+        "pas": (2.466, 0.026),
+    },
+}
+
 
 def build_dataset(key: str):
     """Construct a dataset by key. Called inside the worker process."""
     from pas.datasets.amazon_review import AmazonReviewDataset
     from pas.datasets.galaxy_zoo import GalaxyZooDataset
+    from pas.datasets.synthetic_model import GaussianSyntheticDataset
 
     if key == "amazon_base":
         return AmazonReviewDataset(tuned=False)
@@ -113,30 +144,38 @@ def build_dataset(key: str):
         return AmazonReviewDataset(tuned=True)
     if key == "galaxy":
         return GalaxyZooDataset()
+    if key in SYNTHETIC_DATASETS:
+        # Table 2 / Figure 3 configuration; second moments known in closed form.
+        return GaussianSyntheticDataset(
+            good_f=(key == "synthetic_f1"), M=200,
+            has_true_vars=True, split_seed=4321,
+        )
     raise ValueError(f"unknown dataset {key!r}")
 
 
-def _accepts_share_var(func) -> bool:
+def _accepts(func, name: str) -> bool:
     try:
-        return "share_var" in inspect.signature(func).parameters
+        return name in inspect.signature(func).parameters
     except (TypeError, ValueError):  # builtins / C functions
         return False
 
 
 def run_cell(args) -> dict:
-    """One (dataset, share_var) cell: K replicates over all nine estimators."""
-    dataset_key, share_var, trials = args
+    """One dataset: K replicates over that table's estimator rows."""
+    dataset_key, trials = args
 
     warnings.filterwarnings("ignore")
     from pas.estimators import ALL_ESTIMATORS
     from pas.experiments import run_benchmark
 
-    # `mle` must come first: run_benchmark measures "% Improved" against it.
-    estimators = {key: ALL_ESTIMATORS[key] for _, key in ROWS}
+    rows = SYNTHETIC_ROWS if dataset_key in SYNTHETIC_DATASETS else ROWS
+    estimators = {key: ALL_ESTIMATORS[key] for _, key in rows}
+    # UniPT / UniPAS deliberately take no moment argument: Appendix C.2 / C.3
+    # fix their moment handling, so it is part of the estimator, not a knob.
     estimator_kwargs = {
-        key: {"share_var": share_var}
-        for key in estimators
-        if _accepts_share_var(estimators[key])
+        key: {"moments": MOMENTS}
+        for key, func in estimators.items()
+        if _accepts(func, "moments")
     }
 
     dataset = build_dataset(dataset_key)
@@ -150,12 +189,12 @@ def run_cell(args) -> dict:
     )
 
     records = []
-    for label, key in ROWS:
+    for label, key in rows:
         mse = frame[key].astype(float)
         frac = frame[f"{key}_frac"].astype(float)
         records.append({
             "dataset": dataset_key,
-            "share_var": share_var,
+            "share_var": False,          # i.e. moments="per_problem"
             "estimator": key,
             "label": label,
             "trials": int(len(frame)),
@@ -167,57 +206,60 @@ def run_cell(args) -> dict:
 
     return {
         "dataset": dataset_key,
-        "share_var": share_var,
         "M": int(dataset.M),
-        "share_var_applied_to": sorted(estimator_kwargs),
+        "moments": MOMENTS,
+        "moments_applied_to": sorted(estimator_kwargs),
         "records": records,
         "raw": frame.astype(float).to_dict(orient="list"),
     }
 
 
-def render_text_table(summary: pd.DataFrame, share_var: bool) -> str:
-    sub = summary[summary["share_var"] == share_var]
+def render_text_table(summary: pd.DataFrame, datasets: dict, rows: list,
+                      title: str, with_improved: bool = True) -> str:
+    width = 34 if with_improved else 18
     lines = [
-        f"=== share_var={share_var} ===",
-        f"{'Estimator':18s}" + "".join(
-            f"{DATASET_LABELS[d]:>34s}" for d in DATASET_LABELS
-        ),
-        f"{'':18s}" + "".join(f"{'MSE x1e-3':>18s}{'% Impr':>16s}"
-                              for _ in DATASET_LABELS),
+        f"=== {title} ===",
+        f"{'Estimator':18s}" + "".join(f"{datasets[d]:>{width}s}" for d in datasets),
+        f"{'':18s}" + "".join(
+            (f"{'MSE x1e-3':>18s}{'% Impr':>16s}" if with_improved
+             else f"{'MSE x1e-3':>18s}") for _ in datasets),
     ]
-    for label, key in ROWS:
+    for label, key in rows:
         cells = ""
-        for dataset in DATASET_LABELS:
-            row = sub[(sub["dataset"] == dataset) & (sub["estimator"] == key)]
+        for dataset in datasets:
+            row = summary[(summary["dataset"] == dataset)
+                          & (summary["estimator"] == key)]
             if row.empty:
-                cells += f"{'-':>18s}{'-':>16s}"
+                cells += f"{'-':>18s}" + ("" if not with_improved else f"{'-':>16s}")
                 continue
             row = row.iloc[0]
-            mse = f"{row['mse_mean_e3']:.3f}+-{row['mse_se_e3']:.3f}"
-            if key == "mle":
-                impr = "baseline"
-            else:
-                impr = f"{row['improved_pct_mean']:.1f}+-{row['improved_pct_se']:.1f}"
-            cells += f"{mse:>18s}{impr:>16s}"
+            cells += f"{f'{row.mse_mean_e3:.3f}+-{row.mse_se_e3:.3f}':>18s}"
+            if with_improved:
+                impr = ("baseline" if key == "mle" else
+                        f"{row.improved_pct_mean:.1f}+-{row.improved_pct_se:.1f}")
+                cells += f"{impr:>16s}"
         lines.append(f"{label:18s}{cells}")
     return "\n".join(lines)
 
 
 def render_comparison(summary: pd.DataFrame) -> str:
-    """MSE only: published vs the two runs, so drift is easy to eyeball."""
+    """MSE only: published vs re-run, so drift is easy to eyeball."""
     lines = ["=== MSE (x1e-3): published vs re-run ===",
-             f"{'Dataset':16s}{'Estimator':18s}{'published':>12s}"
-             f"{'share_var=F':>14s}{'share_var=T':>14s}"]
+             f"{'Dataset':16s}{'Estimator':18s}{'published':>12s}{'re-run':>12s}"
+             f"{'ratio':>9s}"]
     for dataset in DATASET_LABELS:
-        for label, key in ROWS:
-            pub = PUBLISHED[dataset][key][0]
-            def _get(sv):
-                row = summary[(summary["dataset"] == dataset)
-                              & (summary["estimator"] == key)
-                              & (summary["share_var"] == sv)]
-                return f"{row.iloc[0]['mse_mean_e3']:.3f}" if not row.empty else "-"
-            lines.append(f"{dataset:16s}{label:18s}{pub:>12.3f}"
-                         f"{_get(False):>14s}{_get(True):>14s}")
+        rows = SYNTHETIC_ROWS if dataset in SYNTHETIC_DATASETS else ROWS
+        for label, key in rows:
+            pub = (PUBLISHED_SYNTHETIC[dataset][key][0]
+                   if dataset in SYNTHETIC_DATASETS
+                   else PUBLISHED[dataset][key][0])
+            row = summary[(summary["dataset"] == dataset)
+                          & (summary["estimator"] == key)]
+            if row.empty:
+                continue
+            new = float(row.iloc[0]["mse_mean_e3"])
+            lines.append(f"{dataset:16s}{label:18s}{pub:>12.3f}{new:>12.3f}"
+                         f"{new / pub:>9.3f}")
         lines.append("")
     return "\n".join(lines)
 
@@ -227,20 +269,14 @@ def main() -> None:
     parser.add_argument("--trials", type=int, default=200)
     parser.add_argument("--datasets", nargs="+", choices=sorted(DATASET_LABELS),
                         default=sorted(DATASET_LABELS))
-    parser.add_argument("--share-var", choices=("both", "on", "off"), default="both")
-    parser.add_argument("--num-workers", type=int, default=6)
+    parser.add_argument("--num-workers", type=int, default=5)
     parser.add_argument("--out-dir", type=Path, default=HERE / "results")
     args = parser.parse_args()
 
-    share_var_values = {"both": [False, True], "on": [True], "off": [False]}[
-        args.share_var
-    ]
-    jobs = [(d, sv, args.trials) for d in args.datasets for sv in share_var_values]
-
+    jobs = [(d, args.trials) for d in args.datasets]
     args.out_dir.mkdir(parents=True, exist_ok=True)
-    print(f"{len(jobs)} jobs ({len(args.datasets)} datasets x "
-          f"{len(share_var_values)} share_var) on "
-          f"{min(args.num_workers, len(jobs))} workers, K={args.trials}")
+    print(f"{len(jobs)} jobs on {min(args.num_workers, len(jobs))} workers, "
+          f"K={args.trials}, moments={MOMENTS}")
 
     results = []
     ctx = mp.get_context("spawn")
@@ -249,52 +285,40 @@ def main() -> None:
     ) as pool:
         futures = {pool.submit(run_cell, job): job for job in jobs}
         for future in as_completed(futures):
-            dataset_key, share_var, _ = futures[future]
+            dataset_key, _ = futures[future]
             payload = future.result()
             results.append(payload)
             pd.DataFrame(payload["raw"]).to_csv(
-                args.out_dir / f"raw_{dataset_key}_sharevar-{share_var}.csv",
-                index_label="trial",
-            )
-            print(f"  done: {dataset_key} share_var={share_var} "
-                  f"(M={payload['M']})", flush=True)
+                args.out_dir / f"raw_{dataset_key}.csv", index_label="trial")
+            print(f"  done: {dataset_key} (M={payload['M']})", flush=True)
 
     summary = pd.DataFrame([r for p in results for r in p["records"]])
-    summary = summary.sort_values(["dataset", "share_var", "estimator"])
+    summary = summary.sort_values(["dataset", "estimator"])
     summary.to_csv(args.out_dir / "summary.csv", index=False)
 
     print()
-    for share_var in share_var_values:
-        print(render_text_table(summary, share_var))
+    real = {k: v for k, v in REAL_DATASETS.items() if k in args.datasets}
+    synth = {k: v for k, v in SYNTHETIC_DATASETS.items() if k in args.datasets}
+    if real:
+        print(render_text_table(summary, real, ROWS,
+                                "Table 3 (real data), share_var=False"))
+        print()
+    if synth:
+        print(render_text_table(summary, synth, SYNTHETIC_ROWS,
+                                "Table 2 (synthetic model)", with_improved=False))
         print()
     print(render_comparison(summary))
-
-    # Rows that ignore share_var must match exactly across the two runs.
-    if len(share_var_values) == 2:
-        insensitive = [k for _, k in ROWS
-                       if k not in results[0]["share_var_applied_to"]]
-        mismatches = []
-        for dataset in args.datasets:
-            for key in insensitive:
-                vals = [
-                    summary[(summary["dataset"] == dataset)
-                            & (summary["estimator"] == key)
-                            & (summary["share_var"] == sv)]["mse_mean_e3"].iloc[0]
-                    for sv in (False, True)
-                ]
-                if not np.isclose(vals[0], vals[1], rtol=1e-12):
-                    mismatches.append((dataset, key, vals))
-        print(f"share_var-insensitive rows ({', '.join(insensitive)}): "
-              f"{'MATCH' if not mismatches else f'MISMATCH {mismatches}'}")
 
     with open(args.out_dir / "meta.json", "w") as fh:
         json.dump({
             "trials": args.trials,
             "datasets": args.datasets,
-            "share_var_values": share_var_values,
-            "rows": [k for _, k in ROWS],
-            "share_var_applied_to": results[0]["share_var_applied_to"],
-            "split_seed": "dataset default (42); replicate k uses seed 42 + k",
+            "moments": MOMENTS,
+            "moments_applied_to": results[0]["moments_applied_to"],
+            "table3_rows": [k for _, k in ROWS],
+            "table2_rows": [k for _, k in SYNTHETIC_ROWS],
+            "split_seed": "dataset default (42 real, 4321 synthetic); "
+                          "replicate k uses seed + k",
         }, fh, indent=2)
     print(f"\nSaved -> {args.out_dir}")
 

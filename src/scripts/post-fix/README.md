@@ -1,37 +1,44 @@
-# Post-fix reproduction of PAS Table 3
+# Post-fix reproduction of PAS Tables 2 and 3
 
-Re-runs the PAS paper's real-data benchmark after six code corrections found by
-comparing the implementation against the camera-ready appendices. Produces the
-paper's Table 3 twice — once with second moments estimated per problem
-(`share_var=False`) and once pooled across problems (`share_var=True`).
+Re-runs the PAS paper's benchmarks after the code corrections found by comparing
+the implementation against the camera-ready appendices. Produces the paper's
+Table 3 (real data) and Table 2 (synthetic model), each alongside its published
+counterpart for reference.
 
 ## Reproduce
 
 ```bash
-./src/scripts/post-fix/reproduce.sh          # K = 200 (a few minutes, 6 subprocesses)
+./src/scripts/post-fix/reproduce.sh          # K = 200 (a few minutes, 5 subprocesses)
 TRIALS=5 ./src/scripts/post-fix/reproduce.sh # smoke run
 ```
 
 Or the two steps separately:
 
 ```bash
-uv run python src/scripts/post-fix/run_post_fix_tables.py --trials 200 --num-workers 6
+uv run python src/scripts/post-fix/run_post_fix_tables.py --trials 200 --num-workers 5
 uv run python src/scripts/post-fix/make_latex_tables.py
 ```
 
-Configuration matches Appendix E.4: `K = 200` replicates, dataset default split
-seed (42; replicate *k* uses seed 42 + *k*), `train_test_split = 0.2`. The six
-`(dataset, share_var)` cells run as independent subprocesses; each builds its own
-dataset rather than pickling one across the process boundary.
+Real-data configuration matches Appendix E.4: `K = 200` replicates, dataset
+default split seed (42; replicate *k* uses seed 42 + *k*),
+`train_test_split = 0.2`. Synthetic configuration matches Table 2 / Figure 3:
+`m = 200`, `n_j = 20`, `N_j = 80`, split seed 4321. The five dataset cells run as
+independent subprocesses; each builds its own dataset rather than pickling one
+across the process boundary.
+
+Second moments are per problem (Appendix C.1) everywhere, reported in the tables
+as `share_var=False` — the configuration behind the paper's numbers. On the
+synthetic model the moments are known in closed form (Appendix E.1), so the
+choice does not arise there.
 
 ## Outputs
 
 | File | Contents |
 |------|----------|
-| `post_fix_tables.pdf` | Standalone 2-page render: Tables 1–2 (post-fix) + note, published Table 3 for reference on p. 2 |
+| `post_fix_tables.pdf` | Standalone 2-page render: post-fix Tables 3 and 2 + note, published counterparts on p. 2 |
 | `post_fix_tables.tex` | Source for the above |
 | `post_fix_tables_bodies.tex` | Bare `table` environments, for pasting into the paper |
-| `results/summary.csv` | One row per (dataset, share_var, estimator) with mean and SE |
+| `results/summary.csv` | One row per (dataset, estimator) with mean and SE |
 | `results/raw_*.csv` | Per-replicate MSE and %-improved values |
 | `results/meta.json` | Run configuration |
 
@@ -51,12 +58,11 @@ All verified against the camera-ready appendices; regression tests in
 3. **UniPAS covariance term.** Used `Cov(Y,f)/(N_j n_j)`; Eq. (26) requires
    `γ̇_j = λ̂_clip · τ̂_j²/N_j` — a different moment, an extra `λ̂` factor and a
    different denominator.
-4. **`share_var` ignored by the second moments.** In `get_pas_estimators` and
-   `get_shrinkage_to_mean_estimators` the flag reached only the PT lambdas; the
-   moments were always pooled. `get_shrinkage_only_estimators` had the flag
+4. **The moment choice ignored by the second moments.** In `get_pas_estimators`
+   and `get_shrinkage_to_mean_estimators` the flag reached only the PT lambdas;
+   the moments were always pooled. `get_shrinkage_only_estimators` had the flag
    *inverted* relative to its docstring and to `get_pt_ppi_estimators`. All three
-   now share one `estimate_second_moments()` helper following Appendix C.1, with
-   `True` = pooled and `False` = per-problem throughout.
+   now share one `estimate_second_moments()` helper following Appendix C.1.
 5. **UniPT λ not clipped.** Appendix C.2 defines
    `λ̂_clip := clip(λ̂, [0, 1])`; the code used the raw ratio.
 6. **Pseudo ground-truth.** Amazon and Galaxy averaged only the *unlabelled*
@@ -76,26 +82,23 @@ Two changes beyond that list, both consequences of the above:
   and PT/UniPAS already did this.
 
 Not changed: Appendix C.1 centres `f` at `Z̄_j^{N+n}` when forming γ̂_j, while the
-code uses `np.cov` (centring at the labelled mean). Both are consistent
-estimators of the same quantity.
+code uses `np.cov` (centring at the labelled mean). Since `Σ_i(Y_ij − Ȳ_j) = 0`,
+γ̂_j does not depend on that centring constant at all, so the two expressions are
+algebraically identical.
 
 ## Reading the results
 
-**The MSE scale changed — these tables are not comparable row-for-row with the
-published Table 3.** Fix 6 changes the estimand. Since
-`Ȳ_lab − Ȳ_all = (N/T)(Ȳ_lab − Ȳ_unlab)` pointwise, every squared error is
-rescaled by `(N/T)² = 0.641` at the 80/20 split; the measured Classical ratio is
-0.6417. Relative orderings carry over, absolute levels do not.
+**The real-data tables are not directly comparable row-for-row with the published
+Table 3.** Fix 6 changes the estimand from the mean of the unlabelled responses
+to the mean of all responses, so every estimator is evaluated against a
+different pseudo ground-truth.
 
-**Only four rows respond to `share_var`**: PT, Shrink Classical, Shrink Avg, PAS.
-Classical / Prediction Avg / PPI have no second-moment estimate to share, and
-UniPT / UniPAS deliberately omit the flag (the paper notes sharing variance is not
-meaningful once a single global λ is used). The runner asserts those five rows
-match to 1e-12 across the two runs, which doubles as a check on the parallel
-harness.
+**The synthetic table is directly comparable**, since `θ_j = η_j²` is known
+exactly there and none of the fixes touch it.
 
-**Two findings worth attention.** UniPAS now has the lowest MSE on all three
-datasets (5.475 / 2.071 / 0.546 against PAS's 5.588 / 2.758 / 0.581), reversing
-the published ordering — so the paper's claim that "PAS achieves the lowest MSE
-among all estimators" no longer holds. And Shrink Avg is now genuinely distinct
-from Shrink Classical, since before fix 1 both shrank toward the same target.
+**Which estimators take a moment argument.** PT, Shrink Classical, Shrink Avg and
+PAS do: the paper assumes their second moments known, so the plug-in used in
+practice is an implementation choice it does not specify. UniPT and UniPAS
+deliberately expose no such argument — Appendix C.2/C.3 and Algorithm 2 fix their
+moment handling, making it part of the estimator's definition rather than a knob.
+Classical, Prediction Avg and PPI have no second-moment estimate at all.

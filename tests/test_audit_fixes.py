@@ -12,6 +12,8 @@ Paper references (arXiv:2502.14166v3):
 """
 from __future__ import annotations
 
+import inspect
+
 import numpy as np
 import pytest
 
@@ -29,8 +31,14 @@ from pas.estimators.pas_estimators import (
     get_shrinkage_only_estimators,
     get_shrinkage_to_mean_estimators,
 )
-from pas.estimators.ppi_estimators import get_pt_ppi_estimators
-from pas.estimators.uni_pas_estimators import get_uni_pt_estimators
+from pas.estimators.ppi_estimators import (
+    estimate_second_moments,
+    get_pt_ppi_estimators,
+)
+from pas.estimators.uni_pas_estimators import (
+    get_uni_pas_estimators,
+    get_uni_pt_estimators,
+)
 from pas.intervals.ppi_cis import get_pt_ppi_cis
 
 
@@ -171,15 +179,15 @@ def test_bias_prior_survives_a_negative_measurement_variance() -> None:
 # share_var defaults to the paper's per-problem moments (C.1)
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize(
-    "fn",
-    [
-        get_pt_ppi_estimators,
-        get_shrinkage_only_estimators,
-        get_shrinkage_to_mean_estimators,
-        get_pas_estimators,
-    ],
-)
+_MOMENT_KNOB_ESTIMATORS = [
+    get_pt_ppi_estimators,
+    get_shrinkage_only_estimators,
+    get_shrinkage_to_mean_estimators,
+    get_pas_estimators,
+]
+
+
+@pytest.mark.parametrize("fn", _MOMENT_KNOB_ESTIMATORS)
 def test_share_var_defaults_to_per_problem(fn, toy) -> None:
     default = np.asarray(fn(toy), dtype=float)
     per_problem = np.asarray(fn(toy, share_var=False), dtype=float)
@@ -188,6 +196,97 @@ def test_share_var_defaults_to_per_problem(fn, toy) -> None:
     np.testing.assert_allclose(default, per_problem)
     assert not np.allclose(default, pooled), (
         "fixture must distinguish the two settings for this test to bite"
+    )
+
+
+@pytest.mark.parametrize("fn", _MOMENT_KNOB_ESTIMATORS)
+def test_share_var_is_an_alias_for_the_moments_argument(fn, toy) -> None:
+    np.testing.assert_allclose(
+        np.asarray(fn(toy, share_var=False), dtype=float),
+        np.asarray(fn(toy, moments="per_problem"), dtype=float),
+    )
+    np.testing.assert_allclose(
+        np.asarray(fn(toy, share_var=True), dtype=float),
+        np.asarray(fn(toy, moments="pooled"), dtype=float),
+    )
+    with pytest.raises(ValueError):
+        fn(toy, share_var=True, moments="averaged")
+    with pytest.raises(ValueError):
+        fn(toy, moments="not_a_choice")
+
+
+def test_averaged_moments_are_shared_but_uncontaminated(toy) -> None:
+    """`averaged` shares one value per moment without the between-problem term."""
+    per = estimate_second_moments(toy, moments="per_problem")
+    avg = estimate_second_moments(toy, moments="averaged")
+    pooled = estimate_second_moments(toy, moments="pooled")
+
+    for a, p in zip(avg, per):
+        assert np.allclose(a, a[0]), "averaged must be one shared value"
+        np.testing.assert_allclose(a, np.full(toy.M, p.mean()))
+
+    # ANOVA identity: pooling adds the dispersion of the problem means on top of
+    # the within-problem component, so it cannot equal the average.
+    n = toy.ns
+    ybar = np.array([y.mean() for y in toy.y_labelled])
+    y_all = np.concatenate(toy.y_labelled)
+    within = np.sum((n - 1) * per[0]) / (y_all.size - 1)
+    between = np.sum(n * (ybar - y_all.mean()) ** 2) / (y_all.size - 1)
+    np.testing.assert_allclose(pooled[0][0], within + between)
+    assert pooled[0][0] > avg[0][0]
+
+
+def test_moment_knob_is_ignored_when_oracle_moments_exist() -> None:
+    """Nothing to estimate when the moments are known, so the knob is inert."""
+    from pas.datasets.synthetic_model import GaussianSyntheticDataset
+
+    data = GaussianSyntheticDataset(good_f=True, M=8, has_true_vars=True)
+    reference = estimate_second_moments(data, moments="per_problem")
+    for choice in ("averaged", "pooled"):
+        for a, b in zip(estimate_second_moments(data, moments=choice), reference):
+            np.testing.assert_allclose(a, b)
+
+
+# ---------------------------------------------------------------------------
+# C.2 / C.3: the paper fixes UniPT's and UniPAS's moment handling
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("fn", [get_uni_pt_estimators, get_uni_pas_estimators])
+def test_uni_estimators_expose_no_moment_knob(fn) -> None:
+    """Appendix C.2 / C.3 and Algorithm 2 fix these; they are not tunable.
+
+    UniPT's lambda_hat and UniPAS's sigma_dot / gamma_dot / sigma_check are part
+    of the estimators' *definitions*, so exposing a plug-in choice here would
+    make them different estimators rather than differently-tuned ones.
+    """
+    params = inspect.signature(fn).parameters
+    assert "moments" not in params
+    assert "share_var" not in params
+
+
+def test_unipas_uses_the_paper_averaging_not_pooling(toy) -> None:
+    """sigma_check must be built from Eq. (25)'s averaged per-problem moments."""
+    _, lam = get_uni_pt_estimators(toy, get_lambda=True)
+    n, N = toy.ns, toy.Ns
+    scale = (n + N) / (N * n)
+
+    per = estimate_second_moments(toy, moments="per_problem")
+    pooled = estimate_second_moments(toy, moments="pooled")
+
+    def sigma_check(var_y, var_f, cov_yf):
+        return (var_y / n + scale * lam**2 * var_f - (2 / n) * lam * cov_yf)
+
+    from_paper = sigma_check(*(a.mean() for a in per))
+    from_pooling = sigma_check(*(a[0] for a in pooled))
+    assert not np.allclose(from_paper, from_pooling), (
+        "fixture must separate the two for this test to bite"
+    )
+
+    _, omegas = get_uni_pas_estimators(toy, get_omega=True)
+    implied = omegas * from_paper / (1 - omegas)
+    assert np.allclose(implied, implied[0], rtol=1e-6), (
+        "the omega_j must be consistent with the Eq. (25) sigma_check, i.e. a "
+        "single global omega divided by it"
     )
 
 
