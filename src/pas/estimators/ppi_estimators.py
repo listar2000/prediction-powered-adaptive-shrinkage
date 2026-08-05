@@ -117,8 +117,9 @@ def get_vanilla_ppi_estimators(data: PasDataset) -> np.ndarray:
 
 def get_pt_ppi_estimators(
     data: PasDataset,
-    share_var: bool = True,
-    get_lambdas: bool = False
+    share_var: bool = False,
+    get_lambdas: bool = False,
+    clip_lambda: bool = True,
 ) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
     """ Obtain the power-tuned PPI estimator for the PPI problem. This estimator is **non-compound**.
 
@@ -136,9 +137,17 @@ def get_pt_ppi_estimators(
     Args:
         data (PasDataset): the dataset object.
 
-        share_var (bool): whether to share the variance & covariance across all problems. Default to `False`.
+        share_var (bool): whether to share the variance & covariance across all problems. Default to `False`, \
+            which is the per-problem estimator of Appendix C.1 and the configuration behind the paper's tables.
 
         get_lambdas (bool): whether to return the power-tuning parameter λ_i. Default to `False`.
+
+        clip_lambda (bool): whether to clip each λ_i to `[0, 1]`. Default to `True`. Eq. (13) of the paper \
+            places no bound on the per-problem λ*_j -- clipping is the PPI++ convention, which keeps the \
+            estimator a convex combination and guards against a noisy `Cov(Y, f)` sending λ_i outside the \
+            interval (this binds for roughly 1-4% of (problem, replicate) pairs on the paper's datasets). \
+            Pass `False` for the literal Eq. (13) estimator. Note the paper *does* clip the single global \
+            λ̂ of UniPT (Appendix C.2).
 
     Returns:
         ppi_estimates: the power-tuned PPI estimator for each product. If `get_lambdas` is `True`, the power-tuning parameters will \
@@ -170,7 +179,8 @@ def get_pt_ppi_estimators(
                 data.pred_labelled[i], data.y_labelled[i], ddof=1)[0, 1]
         # compute the lambda for each problem
         lambda_i = (N / (n + N)) * cov_bar / var_bar
-        lambda_i = np.clip(lambda_i, 0, 1)
+        if clip_lambda:
+            lambda_i = np.clip(lambda_i, 0, 1)
         lambdas.append(lambda_i)
 
     ppi_estimates = _get_generic_ppi_estimators(

@@ -51,8 +51,10 @@ class AmazonReviewDataset(PasDataset):
         if not hasattr(self, "product_reviews"):
             self._read_raw_data()
 
-        train_test_split = train_test_split or self.train_test_split
-        split_seed = split_seed or self.split_seed
+        # `is None` rather than `or`: a caller-supplied 0 / 0.0 is a legitimate
+        # value that `or` would silently replace with the stored default.
+        train_test_split = self.train_test_split if train_test_split is None else train_test_split
+        split_seed = self.split_seed if split_seed is None else split_seed
 
         pred_labelled, y_labelled, pred_unlabelled, y_unlabelled = [], [], [], []
         true_theta = []
@@ -84,10 +86,14 @@ class AmazonReviewDataset(PasDataset):
     def reload_data(self, train_test_split: Optional[float] = None, split_seed: Optional[int] = None) -> None:
         """ Reload the dataset with new split parameters.
         """
-        pred_labelled, y_labelled, pred_unlabelled, y_unlabelled, true_theta = self.load_data(
-            train_test_split or self.train_test_split, split_seed or self.split_seed)
+        if train_test_split is not None:
+            self.train_test_split = train_test_split
+        if split_seed is not None:
+            self.split_seed = split_seed
 
-        self.validate_data(pred_labelled, y_labelled,
-                           pred_unlabelled, y_unlabelled)
+        pred_labelled, y_labelled, pred_unlabelled, y_unlabelled, true_theta = self.load_data(
+            self.train_test_split, self.split_seed)
+
+        # `set_metadata` validates, so no need to do it here as well.
         self.set_metadata(pred_labelled, y_labelled,
                           pred_unlabelled, y_unlabelled, true_theta)

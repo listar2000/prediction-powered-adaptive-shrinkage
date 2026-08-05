@@ -12,7 +12,7 @@ from pas.estimators.ppi_estimators import (
 )
 
 
-def get_shrinkage_only_estimators(data: PasDataset, get_lambdas: bool = False, share_var: bool = True, cutoff: float = 0.999) \
+def get_shrinkage_only_estimators(data: PasDataset, get_lambdas: bool = False, share_var: bool = False, cutoff: float = 0.999) \
         -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
     """ Obtain the SURE-minimizing shrinkage estimator for the problem. No PPI is done, only the second stage.
 
@@ -68,8 +68,8 @@ def get_shrinkage_only_estimators(data: PasDataset, get_lambdas: bool = False, s
     return sure_estimates if not get_lambdas else (sure_estimates, lambdas)
 
 
-def get_pas_estimators(data: PasDataset, get_lambdas: bool = False, get_omegas: bool = False, share_var: bool = True,
-                       cutoff: float = 0.999):
+def get_pas_estimators(data: PasDataset, get_lambdas: bool = False, get_omegas: bool = False, share_var: bool = False,
+                       cutoff: float = 0.999, clip_lambda: bool = True):
     """
     The very core `PAS` estimator mentioned in the paper. It adopts a two-stage estimation procedure:
 
@@ -87,12 +87,15 @@ def get_pas_estimators(data: PasDataset, get_lambdas: bool = False, get_omegas: 
         cutoff (float): the cutoff value for the maximum value of λ_i. This is an *ad-hoc* way of restraining the search space \
             for the optimal λ since λ_i = λ^* / (A_i + λ^*), i.e. we can calculate the upper bound of λ^* based on the \
             cutoff value and the maximum A_i. Default to `0.99`.
+
+        clip_lambda (bool): whether the first-stage power-tuning parameters λ_i are clipped to `[0, 1]`. \
+            Default to `True`; forwarded to `get_pt_ppi_estimators`, whose docstring explains the choice.
     """
 
     f_x_bar = np.array([data.pred_unlabelled[i].mean() for i in range(data.M)])
 
     pt_ppi_estimates, sure_lambdas = get_pt_ppi_estimators(
-        data, get_lambdas=True, share_var=share_var)
+        data, get_lambdas=True, share_var=share_var, clip_lambda=clip_lambda)
 
     # `share_var` now reaches the second moments as well, not just the PT
     # lambdas: previously these were always pooled, so `share_var=False` mixed
@@ -136,19 +139,22 @@ def get_pas_estimators(data: PasDataset, get_lambdas: bool = False, get_omegas: 
         return sure_estimates, sure_lambdas, omegas
 
 
-def get_shrinkage_to_mean_estimators(data: PasDataset, get_lambdas: bool = False, get_omegas: bool = False, share_var: bool = True,
-                                     cutoff: float = 0.999):
+def get_shrinkage_to_mean_estimators(data: PasDataset, get_lambdas: bool = False, get_omegas: bool = False, share_var: bool = False,
+                                     cutoff: float = 0.999, clip_lambda: bool = True):
     """
     PT-PPI estimator but shrink towards the average (grand mean) of the estimators themselves (across all m problems).
 
     Implements Eq. (29) / Algorithm 4 ("shrink-average"): the shrinkage target
     is θ̄^PT = m⁻¹ Σ_j θ̂_j^PT, the grand mean of the power-tuned estimates.
 
+    `share_var` and `clip_lambda` carry the same meaning as in
+    `get_pt_ppi_estimators`, which computes the first-stage estimates.
+
     References:
         [1] X. Xie, S. C. Kou, and L. D. Brown, “SURE Estimates for a Heteroscedastic Hierarchical Model”.
     """
     pt_ppi_estimates, sure_lambdas = get_pt_ppi_estimators(
-        data, get_lambdas=True, share_var=share_var)
+        data, get_lambdas=True, share_var=share_var, clip_lambda=clip_lambda)
 
     # `share_var` now reaches the second moments as well, not just the PT
     # lambdas (previously these were always pooled).

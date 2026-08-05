@@ -91,7 +91,7 @@ One benefit of this unified interface is that once you provide the implementatio
 💡 Special note about the <code>reload_data</code> method
 </summary>
 
-The `reload_data` method is used to reload the dataset, which is a very common operation when we want to repeat the same experiment with different random seeds. There is a default implementation in the `PasDataset` class, which simply calls the `load_data` method with the same parameters. However, if you want to implement a custom dataset, you should override this method to reload the dataset with new split parameters.
+The `reload_data` method is used to reload the dataset, which is a very common operation when we want to repeat the same experiment with different random seeds. There is a default implementation in the `PasDataset` class: it records the new seed on `self.split_seed` and then calls `load_data()` again. So if your `load_data` has the no-argument signature shown above, **read `self.split_seed` when you draw the split** and the inherited `reload_data` will just work — that is all `run_benchmark` needs. Override `reload_data` only if you want to vary extra split parameters too (see `AmazonReviewDataset.reload_data`, which also takes a labelled fraction).
 
 </details>
 
@@ -101,8 +101,8 @@ _PAS_ offers a very comprehensive suite of estimators for compound mean estimati
 
 - `src/pas/estimators/simple_estimators.py`: Basic statistical estimators like prediction mean and classical estimator.
 - `src/pas/estimators/ppi_estimators.py`: PPI and PPI++ estimators [[Angeloulous et al. 2024]](https://arxiv.org/abs/2311.01453)
-- `src/pas/estimators/pas_estimators.py`: _PAS_ estimators [[Ours]](https://arxiv.org/abs/2507.15500) & Shrinkage-only estimators [[Xie et al. 2012]](http://stat.wharton.upenn.edu/~lbrown/Papers/2012e%20SURE%20estimates%20for%20a%20heteroscedastic%20hierarchical%20model.pdf)
-- `src/pas/estimators/uni_pas_estimators.py`: Univariate _PAS_ estimators [[Ours (appendix)]](https://arxiv.org/abs/2507.15500)
+- `src/pas/estimators/pas_estimators.py`: _PAS_ estimators [[Ours]](https://arxiv.org/abs/2502.14166) & Shrinkage-only estimators [[Xie et al. 2012]](http://stat.wharton.upenn.edu/~lbrown/Papers/2012e%20SURE%20estimates%20for%20a%20heteroscedastic%20hierarchical%20model.pdf)
+- `src/pas/estimators/uni_pas_estimators.py`: Univariate _PAS_ estimators [[Ours (appendix)]](https://arxiv.org/abs/2502.14166)
 
 
 In a nutshell, all estimators look like this:
@@ -216,4 +216,4 @@ python src/scripts/run_synthetic_ci.py
 ---
 ### Footnotes
 
-<a name="fn1">1</a>: please refer to the [paper](https://arxiv.org/abs/2507.15500) for the definition of many concepts, such as "compound mean estimation problems", "power-tuning parameter", "shrinkage-to-mean", etc.
+<a name="fn1">1</a>: please refer to the [paper](https://arxiv.org/abs/2502.14166) for the definition of many concepts, such as "compound mean estimation problems", "power-tuning parameter", "shrinkage-to-mean", etc.

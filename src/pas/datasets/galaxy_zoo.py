@@ -61,8 +61,10 @@ class GalaxyZooDataset(PasDataset):
         if not hasattr(self, "galaxy_groups"):
             self._read_raw_data()
 
-        train_test_split = train_test_split or self.train_test_split
-        split_seed = split_seed or self.split_seed
+        # `is None` rather than `or`: a caller-supplied 0 / 0.0 is a legitimate
+        # value that `or` would silently replace with the stored default.
+        train_test_split = self.train_test_split if train_test_split is None else train_test_split
+        split_seed = self.split_seed if split_seed is None else split_seed
 
         pred_labelled, y_labelled, pred_unlabelled, y_unlabelled = [], [], [], []
         true_theta = []
@@ -97,7 +99,12 @@ class GalaxyZooDataset(PasDataset):
     def reload_data(self, train_test_split: Optional[float] = None, split_seed: Optional[int] = None) -> None:
         """ Reload the dataset with new split parameters.
         """
+        if train_test_split is not None:
+            self.train_test_split = train_test_split
+        if split_seed is not None:
+            self.split_seed = split_seed
+
         pred_labelled, y_labelled, pred_unlabelled, y_unlabelled, true_theta = self.load_data(
-            train_test_split or self.train_test_split, split_seed or self.split_seed)
+            self.train_test_split, self.split_seed)
         self.set_metadata(pred_labelled, y_labelled,
                           pred_unlabelled, y_unlabelled, true_theta)

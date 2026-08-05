@@ -80,9 +80,24 @@ def _get_global_ppi_lambda(
     f_x_tilde: np.ndarray,
     f_x: np.ndarray,
     y: np.ndarray,
+    clip: Tuple[float, float] = (0.0, 1.0),
 ) -> float:
     """Estimate a single global lambda by minimizing the sum of estimated
     variances across all problems.
+
+    This is the same estimator as `uni_pas_estimators.get_uni_pt_estimators`'s
+    global lambda, i.e. Appendix C.2's
+
+        lambda_hat = sum_j gamma_hat_j / n_j
+                     / sum_j ((n_j + N_j) / (n_j N_j)) tau_hat_j^2,
+
+    and, like C.2, it is clipped: the appendix defines the UniPT estimator in
+    terms of `lambda_hat_clip := clip(lambda_hat, [0, 1])`, not the raw ratio,
+    so the clip is part of the estimator rather than a numerical guard.
+
+    Args:
+        clip: lower and upper bounds for lambda_hat. Pass `None` for the
+            unclipped ratio.
 
     Returns:
         lambda_hat: estimated global lambda.
@@ -104,7 +119,10 @@ def _get_global_ppi_lambda(
     if denominator <= 0:
         raise ValueError("Estimated denominator is non-positive, so lambda is undefined.")
 
-    return float(numerator / denominator)
+    lambda_hat = numerator / denominator
+    if clip is not None:
+        lambda_hat = np.clip(lambda_hat, clip[0], clip[1])
+    return float(lambda_hat)
 
 
 def _param_prior_computation_for_bias(bias, cov_mats):
@@ -115,7 +133,11 @@ def _param_prior_computation_for_bias(bias, cov_mats):
         hat_mu_b: estimated prior mean.
         hat_var_b: estimated prior variance.
     """
-    meas_var = cov_mats[:, 1, 1]
+    # Var(b_hat_i) is a plug-in difference of sample moments, so in small
+    # samples it can come out negative. A negative measurement variance would
+    # make `total_var` below non-positive and turn the log-likelihood into NaN,
+    # which `minimize` reports as a "successful" fit at the starting point.
+    meas_var = np.maximum(cov_mats[:, 1, 1], 0.0)
 
     init_mean = bias.mean()
     s2_obs = np.var(bias, ddof=1) if len(bias) > 1 else 0.0

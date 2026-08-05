@@ -13,7 +13,14 @@ DATA_PATHS = {
         "predictions": PROJECT_ROOT / "data/galaxy/galaxy_test_prediction.csv"
     },
     "lmarena": {
-        "cleaned": PROJECT_ROOT / "data/lmarena/clean_data/clean_summary.csv"
+        # Both files hold the same 40,663 pairwise comparisons and differ only
+        # in the `prediction` column: `binary` is the judge's hard 0/1 call,
+        # `bt_prob` the Bradley-Terry win probability. Everything downstream
+        # (diagnostics, CI benchmarks, the docs notes) uses the Bradley-Terry
+        # predictor, so `cleaned` resolves there rather than to the binary file.
+        "binary": PROJECT_ROOT / "data/lmarena/clean_data/clean_summary.csv",
+        "bt_prob": PROJECT_ROOT / "data/lmarena/clean_data/clean_summary_v2.csv",
+        "cleaned": PROJECT_ROOT / "data/lmarena/clean_data/clean_summary_v2.csv",
     }
 }
 

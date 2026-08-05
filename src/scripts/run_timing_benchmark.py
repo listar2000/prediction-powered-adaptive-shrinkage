@@ -33,7 +33,7 @@ kwargs = {
 }
 
 if __name__ == "__main__":
-    dataset = AmazonReviewDataset(good_review=True)
+    dataset = AmazonReviewDataset(tuned=True)
 
     # mse_results = run_benchmark(
     #     dataset, trials=200, summary=True, estimator_kwargs=kwargs)

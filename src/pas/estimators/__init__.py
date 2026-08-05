@@ -16,6 +16,9 @@ __all__ = [
     "get_uni_pas_estimators",
     "get_eb_ppi_estimators",
     "get_eb_unipt_ppi_estimators",
+    "CORE_ESTIMATORS",
+    "PAPER_TABLE3_ESTIMATORS",
+    "ALL_ESTIMATORS",
 ]
 
 
@@ -30,10 +33,20 @@ CORE_ESTIMATORS = {
 }
 
 
-ALL_ESTIMATORS = {
+# The nine rows of Table 3, in the paper's order. `CORE_ESTIMATORS` alone is the
+# seven rows of Table 2 (the synthetic study); the real-data table adds UniPT and
+# UniPAS, which the paper includes "only for the real-world experiments, as they
+# are specifically designed for settings where the second moments are unknown".
+# `mle` must stay first: `run_benchmark` measures "% Improved" against it.
+PAPER_TABLE3_ESTIMATORS = {
     **CORE_ESTIMATORS,
     "uni_pt": get_uni_pt_estimators,
     "uni_pas": get_uni_pas_estimators,
+}
+
+
+ALL_ESTIMATORS = {
+    **PAPER_TABLE3_ESTIMATORS,
     "eb_ppi": get_eb_ppi_estimators,
     "eb_unipt_ppi": get_eb_unipt_ppi_estimators,
 }

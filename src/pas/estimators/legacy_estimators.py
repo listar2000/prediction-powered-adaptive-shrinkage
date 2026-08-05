@@ -42,16 +42,18 @@ def get_shrink_var_ppi_estimators(data: PasDataset, get_lambdas: bool = False):
     # unbiased sample variance and sample variance of the sample variance
     sv, sv2 = [], []
     for i in range(data.M):
-        N = data.Ns[i]
         all_pred = np.concatenate(
             [data.pred_labelled[i], data.pred_unlabelled[i]])
+        # `ws` has n_i + N_i entries, so the bias corrections below must use
+        # that count -- not N_i, the unlabelled count alone.
+        n_all = all_pred.shape[0]
 
         bar_f_x = all_pred.mean()
         ws = (all_pred - bar_f_x) ** 2
         bar_ws = ws.mean()
 
-        sv.append((N / (N - 1)) * bar_ws)
-        sv2.append(N / (N - 1) ** 3 * np.sum((ws - bar_ws) ** 2))
+        sv.append((n_all / (n_all - 1)) * bar_ws)
+        sv2.append(n_all / (n_all - 1) ** 3 * np.sum((ws - bar_ws) ** 2))
 
         cov_bar.append(
             np.cov(data.pred_labelled[i], data.y_labelled[i], ddof=1)[0, 1])
@@ -95,7 +97,7 @@ def get_mixed_compound_pt_ppi_estimators(data: PasDataset, get_w: bool = False):
     return mixed_ppi_estimates if not get_w else (mixed_ppi_estimates, w)
 
 
-def get_split_sure_ppi_estimators(data: PasDataset, split_ratio: float = 0.5, cutoff: float = 0.999, share_var: bool = True, get_lambdas: bool = False):
+def get_split_sure_ppi_estimators(data: PasDataset, split_ratio: float = 0.5, cutoff: float = 0.999, share_var: bool = False, get_lambdas: bool = False):
     """ SURE-PPI estimator with split unlabelled data.
 
     This estimator splits the unlabelled data into two parts for each problem:
@@ -159,8 +161,11 @@ def get_split_sure_ppi_estimators(data: PasDataset, split_ratio: float = 0.5, cu
 
     # Calculate variances and covariances
     if data.has_true_vars:
-        var_y = data.true_vars
-        cov_y_f_x = data.true_covs
+        # `true_vars` is tau^2 = Var(f(X)); the quantity needed here is
+        # sigma^2 = Var(Y), i.e. `true_y_vars`. Both then need dividing by n_j
+        # to become variances of the labelled *means*, as the else-branch does.
+        var_y = np.asarray(data.true_y_vars, dtype=float) / data.ns
+        cov_y_f_x = np.asarray(data.true_covs, dtype=float) / data.ns
     else:
         var_y = np.concatenate(data.y_labelled).var(ddof=1)
         var_y = var_y / data.ns
@@ -191,7 +196,7 @@ def get_split_sure_ppi_estimators(data: PasDataset, split_ratio: float = 0.5, cu
     return sure_estimates if not get_lambdas else (sure_estimates, lambdas)
 
 
-def get_kfold_split_sure_ppi_estimators(data: PasDataset, n_folds: int = 2, cutoff: float = 0.999, share_var: bool = True, get_lambdas: bool = False):
+def get_kfold_split_sure_ppi_estimators(data: PasDataset, n_folds: int = 2, cutoff: float = 0.999, share_var: bool = False, get_lambdas: bool = False):
     """ K-fold SURE-PPI estimator with split unlabelled data.
 
     This estimator performs K-fold splitting of unlabelled data and averages the estimates.
