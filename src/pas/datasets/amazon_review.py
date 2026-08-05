@@ -68,8 +68,12 @@ class AmazonReviewDataset(PasDataset):
             pred_unlabelled.append(product_reviews[1, indices[split_idx:]])
             y_unlabelled.append(product_reviews[0, indices[split_idx:]])
 
-            # calculate the `true` theta through y_unlabelled
-            true_theta.append(np.mean(y_unlabelled[-1]))
+            # Pseudo ground-truth: the mean of *all* responses for this problem
+            # (Appendix E.4: theta_dot_j := (1/T_j) sum_i Ydot_ij), not just the
+            # unlabelled half. Averaging only the unlabelled split would make the
+            # estimand move with the train/test split from trial to trial.
+            true_theta.append(
+                np.mean(np.concatenate([y_labelled[-1], y_unlabelled[-1]])))
 
         if self.verbose:
             print(
