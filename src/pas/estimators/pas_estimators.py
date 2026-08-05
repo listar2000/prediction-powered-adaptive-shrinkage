@@ -5,7 +5,11 @@ import numpy as np
 from typing import Union, Tuple
 from pas.datasets.dataset import PasDataset
 from pas.utils import _minimize_lbfgs
-from pas.estimators.ppi_estimators import get_pt_ppi_estimators
+from pas.estimators.ppi_estimators import (
+    MIN_PT_VARIANCE,
+    estimate_second_moments,
+    get_pt_ppi_estimators,
+)
 
 
 def get_shrinkage_only_estimators(data: PasDataset, get_lambdas: bool = False, share_var: bool = True, cutoff: float = 0.999) \
@@ -40,22 +44,14 @@ def get_shrinkage_only_estimators(data: PasDataset, get_lambdas: bool = False, s
         [1] X. Xie, S. C. Kou, and L. D. Brown, “SURE Estimates for a Heteroscedastic Hierarchical Model”.
     """
     # prepare observations for minimizing SURE
-    var_y, f_x_tilde_bar, y_bar = [], [], []
-    for i in range(data.M):
-        n = data.ns[i]
-        if share_var:
-            var_y.append(data.y_labelled[i].var(ddof=1))
-        f_x_tilde_bar.append(data.pred_unlabelled[i].mean())
-        y_bar.append(data.y_labelled[i].mean())
+    f_x_tilde_bar = np.array([data.pred_unlabelled[i].mean() for i in range(data.M)])
+    y_bar = np.array([data.y_labelled[i].mean() for i in range(data.M)])
 
-    if not share_var:
-        var_y = np.concatenate(data.y_labelled).var(ddof=1)
-
-    if data.has_true_vars:
-        var_y = data.true_y_vars
-
-    f_x_tilde_bar, y_bar, var_y = np.array(
-        f_x_tilde_bar), np.array(y_bar), np.array(var_y) / data.ns
+    # A_j = Var(Ybar_j) = sigma_hat_j^2 / n_j. `share_var=True` pools the
+    # sigma_hat_j^2 across problems, `False` keeps them per-problem -- the same
+    # convention as `get_pt_ppi_estimators`. This branch used to be inverted.
+    var_y, _, _ = estimate_second_moments(data, share_var)
+    var_y = np.maximum(var_y / data.ns, MIN_PT_VARIANCE)
 
     def sure_fn(lambda_: float) -> float:
         return np.sum((var_y / (var_y + lambda_) ** 2)
@@ -98,15 +94,10 @@ def get_pas_estimators(data: PasDataset, get_lambdas: bool = False, get_omegas: 
     pt_ppi_estimates, sure_lambdas = get_pt_ppi_estimators(
         data, get_lambdas=True, share_var=share_var)
 
-    if data.has_true_vars:
-        var_y = data.true_y_vars
-        var_f_x = data.true_vars
-        cov_y_f_x = data.true_covs
-    else:
-        var_y = np.concatenate(data.y_labelled).var(ddof=1)
-        cov_y_f_x = np.cov(np.concatenate(data.y_labelled),
-                           np.concatenate(data.pred_labelled), ddof=1)[0, 1]
-        var_f_x = np.concatenate(data.pred_unlabelled).var(ddof=1)
+    # `share_var` now reaches the second moments as well, not just the PT
+    # lambdas: previously these were always pooled, so `share_var=False` mixed
+    # per-problem lambdas with pooled moments.
+    var_y, var_f_x, cov_y_f_x = estimate_second_moments(data, share_var)
 
     var_y = var_y / data.ns
     cov_y_f_x = cov_y_f_x / data.ns
@@ -114,6 +105,9 @@ def get_pas_estimators(data: PasDataset, get_lambdas: bool = False, get_omegas: 
 
     var_pt_ppi = var_y + sure_lambdas ** 2 * \
         var_f_x_scaled - 2 * sure_lambdas * cov_y_f_x
+    # See MIN_PT_VARIANCE: this plug-in variance can be negative in small
+    # samples, which would drive omega_j above 1 and anti-shrink.
+    var_pt_ppi = np.maximum(var_pt_ppi, MIN_PT_VARIANCE)
 
     def sure_fn(lambda_: float) -> float:
         first_term = np.sum((var_pt_ppi / (var_pt_ppi + lambda_) ** 2)
@@ -147,23 +141,18 @@ def get_shrinkage_to_mean_estimators(data: PasDataset, get_lambdas: bool = False
     """
     PT-PPI estimator but shrink towards the average (grand mean) of the estimators themselves (across all m problems).
 
+    Implements Eq. (29) / Algorithm 4 ("shrink-average"): the shrinkage target
+    is θ̄^PT = m⁻¹ Σ_j θ̂_j^PT, the grand mean of the power-tuned estimates.
+
     References:
         [1] X. Xie, S. C. Kou, and L. D. Brown, “SURE Estimates for a Heteroscedastic Hierarchical Model”.
     """
-    f_x_bar = np.array([data.pred_unlabelled[i].mean() for i in range(data.M)])
-
     pt_ppi_estimates, sure_lambdas = get_pt_ppi_estimators(
         data, get_lambdas=True, share_var=share_var)
 
-    if data.has_true_vars:
-        var_f_x = data.true_vars
-        var_y = data.true_y_vars
-        cov_y_f_x = data.true_covs
-    else:
-        var_y = np.concatenate(data.y_labelled).var(ddof=1)
-        cov_y_f_x = np.cov(np.concatenate(data.y_labelled),
-                           np.concatenate(data.pred_labelled), ddof=1)[0, 1]
-        var_f_x = np.concatenate(data.pred_unlabelled).var(ddof=1)
+    # `share_var` now reaches the second moments as well, not just the PT
+    # lambdas (previously these were always pooled).
+    var_y, var_f_x, cov_y_f_x = estimate_second_moments(data, share_var)
 
     var_y = var_y / data.ns
     cov_y_f_x = cov_y_f_x / data.ns
@@ -171,6 +160,9 @@ def get_shrinkage_to_mean_estimators(data: PasDataset, get_lambdas: bool = False
 
     var_pt_ppi = var_y + sure_lambdas ** 2 * \
         var_f_x_scaled - 2 * sure_lambdas * cov_y_f_x
+    # See MIN_PT_VARIANCE: this plug-in variance can be negative in small
+    # samples, which would drive omega_j above 1 and anti-shrink.
+    var_pt_ppi = np.maximum(var_pt_ppi, MIN_PT_VARIANCE)
 
     grand_mean = np.mean(pt_ppi_estimates)
 
@@ -185,7 +177,10 @@ def get_shrinkage_to_mean_estimators(data: PasDataset, get_lambdas: bool = False
     optimal_lbd = _minimize_lbfgs(sure_fn, bounds=(0, lbd_upper))
 
     omegas = optimal_lbd / (var_pt_ppi + optimal_lbd)
-    sure_estimates = omegas * pt_ppi_estimates + (1 - omegas) * f_x_bar
+    # Shrink toward `grand_mean`, the quantity the SURE objective above is built
+    # around. This previously shrank toward the per-problem prediction mean
+    # `f_x_bar`, which is the target of `get_shrinkage_only_estimators`.
+    sure_estimates = omegas * pt_ppi_estimates + (1 - omegas) * grand_mean
 
     if not get_lambdas and not get_omegas:
         return sure_estimates

@@ -5,6 +5,17 @@ import numpy as np
 from pas.datasets.dataset import PasDataset
 from typing import Union, Tuple
 
+#: Floor for plug-in variance estimates of the PT estimator. That variance is a
+#: difference of sample moments (`sigma^2/n + lambda^2 tau^2 (n+N)/(nN) -
+#: 2 lambda gamma / n`), so in small samples it can come out negative -- on the
+#: Amazon `BERT-tuned` corpus this happens for 3 of 200 problems once
+#: `share_var=False` makes the moments per-problem. A negative A_j would push
+#: the shrinkage weight `omega_j = lambda / (A_j + lambda)` above 1 and
+#: extrapolate *away* from the shrinkage target. Flooring at a tiny positive
+#: value sends `omega_j -> 1`, i.e. leaves such a problem's estimate unshrunk,
+#: which is the correct zero-noise limit.
+MIN_PT_VARIANCE = 1e-12
+
 
 def _get_generic_ppi_estimators(f_x_tilde: np.ndarray, f_x: np.ndarray, y: np.ndarray, lambda_: Union[float, np.ndarray]) -> np.ndarray:
     """ Helper function to compute the PPI estimator for the PPI problem.
@@ -28,6 +39,59 @@ def _get_generic_ppi_estimators(f_x_tilde: np.ndarray, f_x: np.ndarray, y: np.nd
         ppi_i = y[i].mean() + lbd * (f_x_tilde[i].mean() - f_x[i].mean())
         ppi.append(ppi_i)
     return np.array(ppi)
+
+
+def estimate_second_moments(
+    data: PasDataset,
+    share_var: bool = False,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """ Estimate the per-problem second moments used by the PT/PAS variance formulas.
+
+    Returns ``(var_y, var_f, cov_yf)``, each of shape ``(M,)``, following the
+    sample-based estimators of Appendix C.1:
+
+    - ``var_y[j]``  = σ̂_j², variance of `Y` over the `n_j` labelled points;
+    - ``var_f[j]``  = τ̂_j², variance of `f(X)` over **all** `n_j + N_j` predictions;
+    - ``cov_yf[j]`` = γ̂_j, covariance of `Y` and `f(X)` over the labelled pairs.
+
+    Args:
+        data (PasDataset): the dataset object.
+
+        share_var (bool): if `True`, pool every problem into a single global \
+            estimate and broadcast it to all problems; if `False`, estimate each \
+            problem separately. Matches the convention in `get_pt_ppi_estimators`. \
+            `data.true_vars` takes precedence whenever it is available.
+
+    Returns:
+        (var_y, var_f, cov_yf): the three second-moment arrays, shape `(M,)` each.
+    """
+    M = data.M
+
+    if data.has_true_vars:
+        return (
+            np.broadcast_to(np.asarray(data.true_y_vars, dtype=float), (M,)).copy(),
+            np.broadcast_to(np.asarray(data.true_vars, dtype=float), (M,)).copy(),
+            np.broadcast_to(np.asarray(data.true_covs, dtype=float), (M,)).copy(),
+        )
+
+    if share_var:
+        all_pred_labelled = np.concatenate(data.pred_labelled)
+        all_y_labelled = np.concatenate(data.y_labelled)
+        var_y = all_y_labelled.var(ddof=1)
+        var_f = np.concatenate(
+            [all_pred_labelled, np.concatenate(data.pred_unlabelled)]).var(ddof=1)
+        cov_yf = np.cov(all_y_labelled, all_pred_labelled, ddof=1)[0, 1]
+        return np.full(M, var_y), np.full(M, var_f), np.full(M, cov_yf)
+
+    var_y = np.empty(M)
+    var_f = np.empty(M)
+    cov_yf = np.empty(M)
+    for j in range(M):
+        var_y[j] = data.y_labelled[j].var(ddof=1)
+        var_f[j] = np.concatenate(
+            [data.pred_labelled[j], data.pred_unlabelled[j]]).var(ddof=1)
+        cov_yf[j] = np.cov(data.y_labelled[j], data.pred_labelled[j], ddof=1)[0, 1]
+    return var_y, var_f, cov_yf
 
 
 def get_vanilla_ppi_estimators(data: PasDataset) -> np.ndarray:
