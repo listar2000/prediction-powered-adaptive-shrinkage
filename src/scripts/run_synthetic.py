@@ -23,9 +23,10 @@ if __name__ == "__main__":
             "get_lambdas": False
         }
     }
-    # Run basic benchmark experiments with Gaussian V2 Dataset
+    # Run basic benchmark experiments with Gaussian V2 Dataset.
+    # m = 200 problems, n_j = 20, N_j = 80: the Table 2 / Figure 3 configuration.
+    # Flip `good_f` to False for the flawed predictor f_2(x) = |x| column.
     dataset = GaussianSyntheticDataset(
-        good_f=True, M=100, has_true_vars=True, split_seed=4321)
-    dataset.additional_y_variance = 0.05
+        good_f=True, M=200, has_true_vars=True, split_seed=4321)
     mse_results = run_benchmark(
         dataset, trials=200, summary=True, estimator_kwargs=kwargs)

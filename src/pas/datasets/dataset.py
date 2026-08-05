@@ -17,6 +17,11 @@ class PasDataset(object):
         self.dataset_name = dataset_name
         self.verbose = verbose
         self.has_true_vars = has_true_vars
+        # Subclasses normally set `split_seed` before calling `super().__init__`;
+        # supply a default for the ones that do not, since `run_benchmark` reads
+        # it to pick the seed of the first replicate.
+        if not hasattr(self, "split_seed"):
+            self.split_seed: int = 42
 
         pred_labelled, y_labelled, pred_unlabelled, y_unlabelled, true_theta = self.load_data()
 
@@ -48,7 +53,7 @@ class PasDataset(object):
             y_labelled (List[np.ndarray]): \
                 list of true responses for labelled data for each problem.
 
-            pred_unlabelled (List[np.ndarray]): \ 
+            pred_unlabelled (List[np.ndarray]): \
                 list of predictions for unlabelled data for each problem.
 
             y_unlabelled (List[np.ndarray]): \
@@ -60,10 +65,19 @@ class PasDataset(object):
         raise NotImplementedError("Subclasses must implement this method")
 
     def reload_data(self, split_seed: int = 42) -> None:
-        """ Reload the dataset with new split parameters. This method should be implemented by the subclass.
+        """ Re-draw the labelled/unlabelled split with a new random seed.
+
+        The new seed is recorded in `self.split_seed` *before* `load_data` runs,
+        and `load_data` is then called with **no arguments** -- matching the
+        signature documented above, so a subclass that implements only
+        `load_data(self)` works with this default implementation. Such a
+        subclass should read `self.split_seed` when splitting.
+
+        Subclasses that need extra split parameters (e.g. a labelled fraction)
+        may override this method; see `AmazonReviewDataset.reload_data`.
         """
-        pred_labelled, y_labelled, pred_unlabelled, y_unlabelled, true_theta = self.load_data(
-            split_seed)
+        self.split_seed = split_seed
+        pred_labelled, y_labelled, pred_unlabelled, y_unlabelled, true_theta = self.load_data()
         self.set_metadata(pred_labelled, y_labelled,
                           pred_unlabelled, y_unlabelled, true_theta)
 

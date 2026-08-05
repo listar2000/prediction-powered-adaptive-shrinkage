@@ -1,13 +1,14 @@
-"""Render the post-fix results as LaTeX tables in the PAS paper's Table 3 layout.
+"""Render the post-fix results as LaTeX tables in the PAS paper's layout.
 
 Reads ``results/summary.csv`` (produced by ``run_post_fix_tables.py``) and writes
 a standalone, compilable document plus the bare table bodies for pasting into
 the paper.
 
-One table per ``share_var`` setting, using the paper's layout: nine estimator
-rows against three dataset column-pairs (MSE, %% Improved). The published
-Table 3 is emitted as a third table for reference only -- the MSE scales are not
-comparable, see the note in the document.
+Emits four tables: the post-fix Table 3 (nine estimator rows against three
+dataset column-pairs, MSE and %% Improved) and the post-fix Table 2 (seven rows,
+two synthetic predictors, MSE only), each followed by its published counterpart
+for reference. The published Table 3 values are not directly comparable -- see
+the note in the document.
 
 Usage (from repo root)::
 
@@ -27,9 +28,10 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 from run_post_fix_tables import (  # noqa: E402
-    DATASET_LABELS,
     PUBLISHED,
+    PUBLISHED_SYNTHETIC,
     ROWS,
+    SYNTHETIC_ROWS,
 )
 
 # Row label as it should appear in LaTeX.
@@ -49,9 +51,12 @@ DATASET_TEX = {
     "amazon_base": r"\textbf{Amazon (base $f$)}",
     "amazon_tuned": r"\textbf{Amazon (tuned $f$)}",
     "galaxy": r"\textbf{Galaxy}",
+    "synthetic_f1": r"\textbf{$f_1(x) = x^2$}",
+    "synthetic_f2": r"\textbf{$f_2(x) = |x|$}",
 }
 
-DATASET_ORDER = ["amazon_base", "amazon_tuned", "galaxy"]
+REAL_ORDER = ["amazon_base", "amazon_tuned", "galaxy"]
+SYNTHETIC_ORDER = ["synthetic_f1", "synthetic_f2"]
 
 
 def _cell(value: float, se: float, best: bool, precision: int = 3) -> str:
@@ -59,13 +64,13 @@ def _cell(value: float, se: float, best: bool, precision: int = 3) -> str:
     return f"\\textbf{{{body}}}" if best else body
 
 
-def _collect(summary: pd.DataFrame, share_var: bool) -> dict:
+def _collect(summary: pd.DataFrame, order: list, rows: list) -> dict:
     """(dataset, estimator) -> (mse, mse_se, impr, impr_se)."""
-    sub = summary[summary["share_var"] == share_var]
     out = {}
-    for dataset in DATASET_ORDER:
-        for _, key in ROWS:
-            row = sub[(sub["dataset"] == dataset) & (sub["estimator"] == key)]
+    for dataset in order:
+        for _, key in rows:
+            row = summary[(summary["dataset"] == dataset)
+                          & (summary["estimator"] == key)]
             if row.empty:
                 continue
             row = row.iloc[0]
@@ -76,38 +81,46 @@ def _collect(summary: pd.DataFrame, share_var: bool) -> dict:
     return out
 
 
-def _published_cells() -> dict:
+def _published_cells(order: list, rows: list) -> dict:
     out = {}
-    for dataset in DATASET_ORDER:
-        for _, key in ROWS:
-            mse, mse_se, impr, impr_se = PUBLISHED[dataset][key]
-            out[(dataset, key)] = (mse, mse_se, impr, impr_se)
+    for dataset in order:
+        for _, key in rows:
+            if dataset in PUBLISHED_SYNTHETIC:
+                mse, mse_se = PUBLISHED_SYNTHETIC[dataset][key]
+                out[(dataset, key)] = (mse, mse_se, None, None)
+            else:
+                out[(dataset, key)] = PUBLISHED[dataset][key]
     return out
 
 
-def make_table(cells: dict, caption: str, label: str) -> str:
-    keys = [key for _, key in ROWS]
+def make_table(cells: dict, caption: str, label: str, order: list, rows: list,
+               with_improved: bool = True) -> str:
+    keys = [key for _, key in rows]
+    n_cols = len(order) * (2 if with_improved else 1)
 
     # Bold the best value per column. "% Improved" skips the Classical row,
     # whose cell reads "baseline".
-    best_mse = {
-        d: min(keys, key=lambda k: cells[(d, k)][0]) for d in DATASET_ORDER
-    }
+    best_mse = {d: min(keys, key=lambda k: cells[(d, k)][0]) for d in order}
     best_impr = {}
-    for d in DATASET_ORDER:
-        candidates = [k for k in keys if k != "mle" and cells[(d, k)][2] is not None]
-        best_impr[d] = max(candidates, key=lambda k: cells[(d, k)][2])
+    if with_improved:
+        for d in order:
+            cand = [k for k in keys if k != "mle" and cells[(d, k)][2] is not None]
+            best_impr[d] = max(cand, key=lambda k: cells[(d, k)][2]) if cand else None
 
-    header_groups = " & ".join(
-        f"\\multicolumn{{2}}{{c}}{{{DATASET_TEX[d]}}}" for d in DATASET_ORDER
-    )
-    cmidrules = " ".join(
-        f"\\cmidrule(lr){{{2 + 2 * i}-{3 + 2 * i}}}" for i in range(len(DATASET_ORDER))
-    )
-    metric_header = " & ".join(
-        r"\textbf{MSE} \( (\times 10^{-3}) \) & \textbf{\% Improved $\uparrow$}"
-        for _ in DATASET_ORDER
-    )
+    if with_improved:
+        header_groups = " & ".join(
+            f"\\multicolumn{{2}}{{c}}{{{DATASET_TEX[d]}}}" for d in order)
+        cmidrules = " ".join(
+            f"\\cmidrule(lr){{{2 + 2 * i}-{3 + 2 * i}}}" for i in range(len(order)))
+        metric_header = " & ".join(
+            r"\textbf{MSE} \( (\times 10^{-3}) \) & \textbf{\% Improved $\uparrow$}"
+            for _ in order)
+    else:
+        header_groups = ""
+        cmidrules = ""
+        metric_header = " & ".join(
+            f"{DATASET_TEX[d]} \\textbf{{MSE}} \\( (\\times 10^{{-3}}) \\)"
+            for d in order)
 
     lines = [
         r"\begin{table}[H]",
@@ -116,32 +129,31 @@ def make_table(cells: dict, caption: str, label: str) -> str:
         f"    \\label{{{label}}}",
         r"    \vskip 0.05in",
         r"    \footnotesize",
-        r"    \begin{tabular}{lcccccc}",
+        f"    \\begin{{tabular}}{{l{'c' * n_cols}}}",
         r"    \toprule",
-        f"    & {header_groups} \\\\",
-        f"    {cmidrules}",
-        f"    \\textbf{{Estimator}} & {metric_header} \\\\",
-        r"    \midrule",
     ]
+    if with_improved:
+        lines += [f"    & {header_groups} \\\\", f"    {cmidrules}"]
+    lines += [f"    \\textbf{{Estimator}} & {metric_header} \\\\", r"    \midrule"]
 
     for key in keys:
         row_cells = []
-        for d in DATASET_ORDER:
+        for d in order:
             mse, mse_se, impr, impr_se = cells[(d, key)]
             row_cells.append(_cell(mse, mse_se, key == best_mse[d]))
-            if key == "mle" or impr is None:
-                row_cells.append("baseline")
-            else:
-                row_cells.append(
-                    _cell(impr, impr_se, key == best_impr[d], precision=1)
-                )
+            if with_improved:
+                if key == "mle" or impr is None:
+                    row_cells.append("baseline")
+                else:
+                    row_cells.append(
+                        _cell(impr, impr_se, key == best_impr[d], precision=1))
         lines.append(f"    {ROW_TEX[key]} & " + " & ".join(row_cells) + r" \\")
 
     lines += [r"    \bottomrule", r"    \end{tabular}", r"\end{table}"]
     return "\n".join(lines)
 
 
-PREAMBLE = r"""% Standalone render of the post-fix PAS Table 3 results.
+PREAMBLE = r"""% Standalone render of the post-fix PAS results (Tables 2 and 3).
 % Build:  pdflatex post_fix_tables.tex
 %
 % Generated by src/scripts/post-fix/make_latex_tables.py -- edit that script
@@ -164,8 +176,10 @@ PREAMBLE = r"""% Standalone render of the post-fix PAS Table 3 results.
 \begin{document}
 
 \begin{center}
-{\large\bfseries PAS Table 3, recomputed after the estimator and pseudo-ground-truth fixes}\\[3pt]
-{\small $K = 200$ replicates, default split seed (42; replicate $k$ uses seed $42+k$), \texttt{train\_test\_split} $=0.2$.}
+{\large\bfseries PAS Tables 2 and 3, recomputed after the estimator and pseudo-ground-truth fixes}\\[3pt]
+{\small $K = 200$ replicates. Real data: default split seed (42; replicate $k$ uses seed $42+k$), \texttt{train\_test\_split} $=0.2$.
+Synthetic: $m = 200$, $n_j = 20$, $N_j = 80$, split seed 4321.
+Second moments per problem throughout (\texttt{share\_var=False}).}
 \end{center}
 """
 
@@ -174,20 +188,18 @@ NOT_COMPARABLE_NOTE = r"""
 \hrule
 \vspace{0.5em}
 {\scriptsize
-\noindent\textbf{The MSE scale changed; these tables are not comparable
-row-for-row with the published Table~3.} The pseudo-ground-truth now averages
-\emph{all} labels for a problem (Appendix~E.4, $\dot\theta_j := T_j^{-1}\sum_i
-\dot Y_{ij}$) instead of the unlabelled split only. Because
-$\bar Y_{\text{lab}} - \bar Y_{\text{all}} = (N/T)(\bar Y_{\text{lab}} -
-\bar Y_{\text{unlab}})$ pointwise, every squared error is rescaled by
-$(N/T)^2 = 0.641$ at an $80\%$ unlabelled split; the measured Classical ratio is
-$0.6417$. Relative orderings carry over, absolute levels do not.
+\noindent\textbf{The evaluation target changed; the real-data table is not
+comparable row-for-row with the published Table~3.} The pseudo-ground-truth now
+averages \emph{all} labels for a problem (Appendix~E.4, $\dot\theta_j :=
+T_j^{-1}\sum_i \dot Y_{ij}$) instead of the unlabelled split only, so every
+estimator is evaluated against a different pseudo ground-truth. The synthetic
+table is unaffected by that change and \emph{is} directly comparable, since
+$\theta_j = \eta_j^2$ is known exactly there.
 
-\noindent\textbf{Which rows respond to \texttt{share\_var}.} Only PT, Shrink
-Classical, Shrink Avg and PAS take the flag. Classical, Prediction Avg and PPI
-have no second-moment estimate to share, and UniPT/UniPAS deliberately omit it
-(the paper notes sharing variance is not meaningful once a single global
-$\lambda$ is used), so those five rows are identical across Tables~1 and~2.
+\noindent\textbf{Second moments.} All cells use the per-problem estimators of
+Appendix~C.1, reported as \texttt{share\_var=False} --- the configuration behind
+the paper's numbers. On the synthetic model the second moments are known in
+closed form (Appendix~E.1), so that choice does not arise.
 \textbf{Bolding} marks the best value in each column.
 }
 """
@@ -202,66 +214,70 @@ def main() -> None:
         help="Bare table bodies, for pasting into the paper.",
     )
     parser.add_argument("--no-published", action="store_true",
-                        help="Omit the published Table 3 reference table.")
+                        help="Omit the published reference tables.")
     parser.add_argument("--no-compile", action="store_true")
     args = parser.parse_args()
 
     summary = pd.read_csv(args.summary)
     trials = int(summary["trials"].iloc[0])
+    present = set(summary["dataset"])
+    real = [d for d in REAL_ORDER if d in present]
+    synth = [d for d in SYNTHETIC_ORDER if d in present]
 
-    tables = []
-    for share_var in (False, True):
-        if share_var not in set(summary["share_var"]):
-            continue
-        cells = _collect(summary, share_var)
-        tables.append(make_table(
-            cells,
+    post_fix, reference = [], []
+
+    if real:
+        post_fix.append(make_table(
+            _collect(summary, real, ROWS),
             caption=(
-                f"Post-fix results aggregated over $K = {trials}$ replicates on the "
-                r"three real-world datasets: Amazon review ratings with "
+                f"Post-fix Table 3: results aggregated over $K = {trials}$ replicates "
+                r"on the three real-world datasets --- Amazon review ratings with "
                 r"\texttt{BERT-base} and \texttt{BERT-tuned} predictors, and spiral "
-                r"galaxy fractions with \texttt{ResNet50} predictor. "
-                f"\\textbf{{Second moments estimated per problem "
-                f"(\\texttt{{share\\_var={share_var}}}).}} "
-                r"Metrics are reported with $\pm$ 1 standard error."
-                if not share_var else
-                f"Post-fix results aggregated over $K = {trials}$ replicates on the "
-                r"three real-world datasets. \textbf{Second moments pooled across "
-                r"problems (\texttt{share\_var=True}).} Only PT, Shrink Classical, "
-                r"Shrink Avg and PAS differ from Table~1. Metrics are reported with "
-                r"$\pm$ 1 standard error."
+                r"galaxy fractions with a \texttt{ResNet50} predictor. Metrics are "
+                r"reported with $\pm$ 1 standard error."
             ),
-            label=f"tbl:postfix_sharevar_{str(share_var).lower()}",
+            label="tbl:postfix_real", order=real, rows=ROWS,
         ))
-
-    if not args.no_published:
-        tables.append(make_table(
-            _published_cells(),
+        reference.append(make_table(
+            _published_cells(real, ROWS),
             caption=(
                 r"\emph{Reference only:} the published Table 3, computed before the "
-                r"fixes. The MSE column scales are not comparable with Tables~1--2 "
-                r"because the pseudo-ground-truth changed; see the note on the "
-                r"preceding page."
+                r"fixes. Not directly comparable with the post-fix table because the "
+                r"pseudo-ground-truth changed; see the note on the preceding page."
             ),
-            label="tbl:postfix_published",
+            label="tbl:published_real", order=real, rows=ROWS,
         ))
 
-    bodies = "\n\n".join(tables) + "\n"
+    if synth:
+        post_fix.append(make_table(
+            _collect(summary, synth, SYNTHETIC_ROWS),
+            caption=(
+                f"Post-fix Table 2: MSE over $K = {trials}$ replicates of the "
+                r"synthetic model with the good predictor $f_1(x) = x^2$ and the "
+                r"flawed predictor $f_2(x) = |x|$. UniPT/UniPAS are omitted, as in "
+                r"the paper, since the second moments are known here. Metrics are "
+                r"reported with $\pm$ 1 standard error."
+            ),
+            label="tbl:postfix_synthetic", order=synth, rows=SYNTHETIC_ROWS,
+            with_improved=False,
+        ))
+        reference.append(make_table(
+            _published_cells(synth, SYNTHETIC_ROWS),
+            caption=r"\emph{Reference only:} the published Table 2.",
+            label="tbl:published_synthetic", order=synth, rows=SYNTHETIC_ROWS,
+            with_improved=False,
+        ))
+
+    bodies = "\n\n".join(post_fix + ([] if args.no_published else reference)) + "\n"
     args.bodies_out.write_text(bodies)
     print(f"Saved table bodies -> {args.bodies_out}")
 
-    # The post-fix tables and the explanatory note share page 1; the published
-    # reference table (if requested) gets its own page.
-    n_post_fix = len(tables) if args.no_published else len(tables) - 1
-    post_fix = "\n\n".join(tables[:n_post_fix]) + "\n"
-    reference = (
-        "\\clearpage\n" + "\n\n".join(tables[n_post_fix:]) + "\n"
-        if n_post_fix < len(tables) else ""
-    )
-    args.out_tex.write_text(
-        PREAMBLE + "\n" + post_fix + NOT_COMPARABLE_NOTE + "\n"
-        + reference + "\n\\end{document}\n"
-    )
+    # Post-fix tables and the explanatory note share page 1; the published
+    # reference tables (if requested) get their own page.
+    body = "\n\n".join(post_fix) + "\n" + NOT_COMPARABLE_NOTE
+    if not args.no_published and reference:
+        body += "\n\\clearpage\n" + "\n\n".join(reference) + "\n"
+    args.out_tex.write_text(PREAMBLE + "\n" + body + "\n\\end{document}\n")
     print(f"Saved standalone document -> {args.out_tex}")
 
     if args.no_compile:

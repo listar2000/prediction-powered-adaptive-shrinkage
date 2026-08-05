@@ -69,9 +69,11 @@ def get_uni_pas_estimators(data: PasDataset, get_lambda: bool = False, get_omega
 
     f_x_bar = np.array([data.pred_unlabelled[i].mean() for i in range(data.M)])
 
-    # step 2: recompute the sample-based unbiased estimate of second moments
+    # Step 2: always recompute the sample-based unbiased second moments. UniPAS
+    # is fully data-driven in Appendix C.3, even when the dataset also exposes
+    # oracle moments for PT/PAS (as the synthetic benchmark does).
     var_y_hats, var_fx_hats, cov_hats = estimate_second_moments(
-        data, share_var=False)
+        data, share_var=False, use_true_moments=False)
 
     n, N = data.ns, data.Ns
     var_fx_scale = (n + N) / (N * n)
