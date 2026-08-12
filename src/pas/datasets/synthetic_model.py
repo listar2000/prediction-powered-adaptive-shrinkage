@@ -1,10 +1,21 @@
 from pas.datasets.dataset import PasDataset
+import math
 import numpy as np
 import numpy.random as npr
 from typing import Tuple, List
 
 
 class GaussianSyntheticDataset(PasDataset):
+    #: Source of the "true" second moments when `has_true_vars=True`.
+    #: `True` (default): estimate them by Monte Carlo over (n_j+N_j)*500 draws
+    #: per problem -- the configuration behind all reported tables. `False`:
+    #: use the closed forms of Appendix E.1 (for f(x)=|x| with the corrected
+    #: gamma_j = 2 eta_j psi^2 (2 Phi(eta_j/psi) - 1); the camera-ready prints
+    #: a wrong expression) and draw only the n_j+N_j data points. Toggling
+    #: changes how much of the RNG stream each problem consumes, so the two
+    #: settings produce different (identically distributed) data realizations.
+    DEBUG_FLAG = True
+
     def __init__(self, good_f: bool = True, M: int = 100, split_seed: int = 42, verbose: bool = False, has_true_vars: bool = True):
         self.M = M
         self.ns = np.repeat(20, self.M)
@@ -48,24 +59,43 @@ class GaussianSyntheticDataset(PasDataset):
                                 [adjusted_cov_xy, adjusted_sigma_y**2]])
 
             # using Monte-Carlo to calculate the true variances & covariancse (if `has_true_vars` is `True`)
-            DEBUG_FLAG = True
-            run_monte_carlo = self.has_true_vars and (not self.good_f or DEBUG_FLAG)
+            run_monte_carlo = self.has_true_vars and self.DEBUG_FLAG
             total_size = (self.ns[i] + self.Ns[i]) * 500 if run_monte_carlo else (self.ns[i] + self.Ns[i])
             x_y = npr.multivariate_normal(x_y_mean, x_y_cov, total_size).T
             # apply predictions
             total_preds = self.pred_f(x_y[0, :])
 
             # calculate the `true` covariance between the ys and the predicted values
-            if not self.good_f or DEBUG_FLAG:
+            if run_monte_carlo:
                 cov_mat = np.cov(total_preds, x_y[1, :], ddof=1)
                 true_vars.append(cov_mat[0, 0])
                 true_covs.append(cov_mat[0, 1])
                 true_y_vars.append(cov_mat[1, 1])
-            else:
-                k = 4 * mu_x_s[i] ** 2 * self.sigma_x ** 2
+            elif self.has_true_vars:
+                # Closed forms of Appendix E.1. Var(Y) = 4 eta^2 psi^2 + c for
+                # both predictors.
+                eta, psi = mu_x_s[i], self.sigma_x
+                k = 4 * eta ** 2 * psi ** 2
                 true_y_vars.append(k + self.additional_y_variance)
-                true_vars.append(k + 2 * self.sigma_x ** 4)
-                true_covs.append(k)
+                if self.good_f:
+                    # f(x) = x^2: Var(f) = 4 eta^2 psi^2 + 2 psi^4, Cov(f, Y) = k.
+                    true_vars.append(k + 2 * psi ** 4)
+                    true_covs.append(k)
+                else:
+                    # f(x) = |x|: folded-normal moments, a = eta/psi.
+                    #   E|X|      = psi sqrt(2/pi) e^{-a^2/2} + eta (2 Phi(a) - 1)
+                    #   Var(f)    = eta^2 + psi^2 - (E|X|)^2
+                    #   Cov(f, Y) = 2 eta Cov(|X|, X) = 2 eta psi^2 (2 Phi(a) - 1)
+                    # via Stein's lemma, Cov(|X|, X) = psi^2 E[sign(X)]. Note the
+                    # camera-ready E.1 prints gamma with a Gaussian-pdf factor
+                    # instead of (2 Phi(a) - 1); that expression fails numerical
+                    # validation (see tests/test_synthetic_moments.py).
+                    a = eta / psi
+                    phi_cdf = 0.5 * (1.0 + math.erf(a / math.sqrt(2.0)))
+                    mean_abs = psi * math.sqrt(2.0 / math.pi) * math.exp(-a ** 2 / 2.0) \
+                        + eta * (2.0 * phi_cdf - 1.0)
+                    true_vars.append(eta ** 2 + psi ** 2 - mean_abs ** 2)
+                    true_covs.append(2.0 * eta * psi ** 2 * (2.0 * phi_cdf - 1.0))
 
             pred_labelled.append(total_preds[:self.ns[i]])
             y_labelled.append(x_y[1, :self.ns[i]])
