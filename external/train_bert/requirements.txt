@@ -1,0 +1,9 @@
+kagglehub
+h5py
+numpy
+pandas
+pyarrow
+torch
+tqdm
+transformers
+accelerate

@@ -98,3 +98,6 @@ src/scripts/lmarena_ci_npmle.pdf
 src/scripts/lmarena_ci_old.pdf
 src/scripts/make_bias_nuisance_diagnostics.py
 src/scripts/make_exchangeability_scatter.py
+
+# Model training
+external/assets
