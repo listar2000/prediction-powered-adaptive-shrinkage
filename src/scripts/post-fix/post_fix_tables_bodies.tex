@@ -1,6 +1,6 @@
 \begin{table}[H]
     \centering
-    \caption{Post-fix Table 3: results aggregated over $K = 200$ replicates on the three real-world datasets --- Amazon review ratings with \texttt{BERT-base} and \texttt{BERT-tuned} predictors, and spiral galaxy fractions with a \texttt{ResNet50} predictor. Metrics are reported with $\pm$ 1 standard error.}
+    \caption{Post-fix Table 3: results aggregated over $K = 200$ replicates on two real-world datasets with three predictor settings --- Amazon review ratings with \texttt{BERT-base} and \texttt{BERT-tuned} predictors, and spiral galaxy fractions with a \texttt{ResNet50} predictor. Metrics are reported with $\pm$ 1 standard error.}
     \label{tbl:postfix_real}
     \vskip 0.05in
     \footnotesize
@@ -13,10 +13,10 @@
     Classical & 15.607 $\pm$ 0.121 & baseline & 15.607 $\pm$ 0.121 & baseline & 1.361 $\pm$ 0.016 & baseline \\
     Prediction Avg & 41.941 $\pm$ 0.057 & 23.6 $\pm$ 0.2 & 4.697 $\pm$ 0.023 & 69.3 $\pm$ 0.2 & 7.252 $\pm$ 0.011 & 13.0 $\pm$ 0.2 \\
     PPI & 9.973 $\pm$ 0.072 & 56.8 $\pm$ 0.2 & 6.262 $\pm$ 0.047 & 64.4 $\pm$ 0.2 & 1.024 $\pm$ 0.013 & 54.0 $\pm$ 0.3 \\
-    PT & 6.663 $\pm$ 0.056 & 67.6 $\pm$ 0.2 & 4.702 $\pm$ 0.039 & 73.1 $\pm$ 0.2 & 0.645 $\pm$ 0.009 & 65.1 $\pm$ 0.3 \\
+    PT & 6.679 $\pm$ 0.057 & 67.6 $\pm$ 0.2 & 4.893 $\pm$ 0.043 & 72.9 $\pm$ 0.2 & 0.681 $\pm$ 0.012 & 64.9 $\pm$ 0.4 \\
     Shrink Classical & 10.202 $\pm$ 0.072 & 54.3 $\pm$ 0.3 & 2.786 $\pm$ 0.021 & 77.3 $\pm$ 0.3 & 0.987 $\pm$ 0.010 & 50.2 $\pm$ 0.4 \\
-    Shrink Avg & 6.526 $\pm$ 0.058 & 67.8 $\pm$ 0.2 & 4.670 $\pm$ 0.040 & 73.1 $\pm$ 0.2 & 0.645 $\pm$ 0.009 & 65.9 $\pm$ 0.4 \\
-    \texttt{PAS} \textbf{(ours)} & 5.588 $\pm$ 0.045 & \textbf{68.7 $\pm$ 0.2} & 2.758 $\pm$ 0.024 & 77.7 $\pm$ 0.2 & 0.581 $\pm$ 0.008 & \textbf{66.3 $\pm$ 0.4} \\
+    Shrink Avg & 6.541 $\pm$ 0.059 & 67.8 $\pm$ 0.2 & 4.861 $\pm$ 0.044 & 72.9 $\pm$ 0.2 & 0.679 $\pm$ 0.012 & 65.7 $\pm$ 0.3 \\
+    \texttt{PAS} \textbf{(ours)} & 5.603 $\pm$ 0.045 & \textbf{68.7 $\pm$ 0.2} & 2.949 $\pm$ 0.030 & 77.5 $\pm$ 0.2 & 0.617 $\pm$ 0.011 & \textbf{66.1 $\pm$ 0.4} \\
     \texttt{UniPT} \textbf{(ours)} & 6.214 $\pm$ 0.051 & 67.2 $\pm$ 0.2 & 3.678 $\pm$ 0.031 & 73.3 $\pm$ 0.2 & 0.622 $\pm$ 0.008 & 65.3 $\pm$ 0.4 \\
     \texttt{UniPAS} \textbf{(ours)} & \textbf{5.475 $\pm$ 0.044} & 67.8 $\pm$ 0.2 & \textbf{2.071 $\pm$ 0.016} & \textbf{78.3 $\pm$ 0.2} & \textbf{0.546 $\pm$ 0.006} & 65.9 $\pm$ 0.3 \\
     \bottomrule
@@ -25,7 +25,7 @@
 
 \begin{table}[H]
     \centering
-    \caption{Post-fix Table 2: MSE over $K = 200$ replicates of the synthetic model with the good predictor $f_1(x) = x^2$ and the flawed predictor $f_2(x) = |x|$. UniPT/UniPAS are omitted, as in the paper, since the second moments are known here. Metrics are reported with $\pm$ 1 standard error.}
+    \caption{Post-fix Table 2: MSE over $K = 200$ replicates of the synthetic model with the good predictor $f_1(x) = x^2$ and the flawed predictor $f_2(x) = |x|$, using $m=200$ and the corrected analytical true second moments, $c=0.05$, and $\psi=0.2$. UniPT/UniPAS are omitted, as in the paper, since the second moments are known here. Metrics are reported with $\pm$ 1 standard error.}
     \label{tbl:postfix_synthetic}
     \vskip 0.05in
     \footnotesize
@@ -33,13 +33,13 @@
     \toprule
     \textbf{Estimator} & \textbf{$f_1(x) = x^2$} \textbf{MSE} \( (\times 10^{-3}) \) & \textbf{$f_2(x) = |x|$} \textbf{MSE} \( (\times 10^{-3}) \) \\
     \midrule
-    Classical & 3.166 $\pm$ 0.022 & 3.166 $\pm$ 0.022 \\
-    Prediction Avg & 0.268 $\pm$ 0.002 & 34.131 $\pm$ 0.115 \\
-    PPI & 2.678 $\pm$ 0.019 & 2.760 $\pm$ 0.018 \\
-    PT & 2.638 $\pm$ 0.019 & 2.662 $\pm$ 0.018 \\
-    Shrink Classical & \textbf{0.268 $\pm$ 0.003} & 2.876 $\pm$ 0.020 \\
-    Shrink Avg & 2.574 $\pm$ 0.018 & 2.599 $\pm$ 0.018 \\
-    \texttt{PAS} \textbf{(ours)} & 0.274 $\pm$ 0.003 & \textbf{2.477 $\pm$ 0.017} \\
+    Classical & 5.187 $\pm$ 0.041 & 5.187 $\pm$ 0.041 \\
+    Prediction Avg & 2.296 $\pm$ 0.013 & 38.906 $\pm$ 0.110 \\
+    PPI & 3.402 $\pm$ 0.027 & 3.492 $\pm$ 0.026 \\
+    PT & 3.172 $\pm$ 0.024 & 3.090 $\pm$ 0.024 \\
+    Shrink Classical & 1.642 $\pm$ 0.012 & 4.346 $\pm$ 0.032 \\
+    Shrink Avg & 3.074 $\pm$ 0.023 & 2.997 $\pm$ 0.022 \\
+    \texttt{PAS} \textbf{(ours)} & \textbf{1.623 $\pm$ 0.012} & \textbf{2.898 $\pm$ 0.022} \\
     \bottomrule
     \end{tabular}
 \end{table}
@@ -71,7 +71,7 @@
 
 \begin{table}[H]
     \centering
-    \caption{\emph{Reference only:} the published Table 2.}
+    \caption{\emph{Reference only:} the published Table 2, which used $\psi=0.1$ rather than the revised $\psi=0.2$.}
     \label{tbl:published_synthetic}
     \vskip 0.05in
     \footnotesize

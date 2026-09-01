@@ -1,0 +1,23 @@
+train_csv: metadata/cleaned/gz2_final_train.csv
+test_csv: metadata/cleaned/gz2_final_test.csv
+images_dir: images
+batch_size: 256
+num_epochs: 20
+num_classes: 8
+learning_rate: 0.0001
+step_size: 10
+gamma: 0.1
+num_workers: 8
+seed: 1234
+model_path: outputs/resnet50.pth
+history_path: outputs/resnet50_history.csv
+prediction_path: metadata/cleaned/galaxy_test_prediction.csv
+class_labels:
+  - Round Elliptical
+  - In-between Elliptical
+  - Cigar-shaped Elliptical
+  - Edge-on Spiral
+  - Barred Spiral
+  - Unbarred Spiral
+  - Irregular
+  - Merger

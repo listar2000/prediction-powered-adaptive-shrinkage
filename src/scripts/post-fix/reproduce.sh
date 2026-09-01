@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# End-to-end reproduction of the post-fix PAS Table 2 and Table 3 results.
+# End-to-end reproduction of the post-fix PAS Tables 2 and 3 and Figure 3.
 #
 #   ./src/scripts/post-fix/reproduce.sh            # K = 200
 #   TRIALS=5 ./src/scripts/post-fix/reproduce.sh   # quick smoke run
@@ -22,6 +22,14 @@ echo "==> Rendering LaTeX tables and compiling the PDF"
 uv run python "${HERE}/make_latex_tables.py"
 
 echo
+echo "==> Rendering Figure 3, its shrinkage close-up, and PT-variance diagnostic"
+uv run python "${HERE}/../paper_plots/plot_synthetic_params.py"
+
+echo
 echo "==> Outputs"
 ls -1 "${HERE}"/post_fix_tables.{tex,pdf} "${HERE}"/post_fix_tables_bodies.tex \
-      "${HERE}"/results/summary.csv
+      "${HERE}"/results/summary.csv "${HERE}"/results/synthetic_params.csv \
+      "${HERE}"/results/synthetic_variances.csv \
+      "${HERE}"/../../../images/synthetic_params.pdf \
+      "${HERE}"/../../../images/synthetic_omegas_zoomed.pdf \
+      "${HERE}"/../../../images/synthetic_variances.pdf

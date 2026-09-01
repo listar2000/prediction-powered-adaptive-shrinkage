@@ -8,7 +8,7 @@ from typing import Tuple, List
 class GaussianSyntheticDataset(PasDataset):
     #: Source of the "true" second moments when `has_true_vars=True`.
     #: `True` (default): estimate them by Monte Carlo over (n_j+N_j)*500 draws
-    #: per problem -- the configuration behind all reported tables. `False`:
+    #: per problem -- the historical benchmark path. `False`:
     #: use the closed forms of Appendix E.1 (for f(x)=|x| with the corrected
     #: gamma_j = 2 eta_j psi^2 (2 Phi(eta_j/psi) - 1); the camera-ready prints
     #: a wrong expression) and draw only the n_j+N_j data points. Toggling
@@ -16,13 +16,23 @@ class GaussianSyntheticDataset(PasDataset):
     #: settings produce different (identically distributed) data realizations.
     DEBUG_FLAG = True
 
-    def __init__(self, good_f: bool = True, M: int = 100, split_seed: int = 42, verbose: bool = False, has_true_vars: bool = True):
+    def __init__(
+        self,
+        good_f: bool = True,
+        M: int = 100,
+        split_seed: int = 42,
+        verbose: bool = False,
+        has_true_vars: bool = True,
+        sigma_x: float = 0.1,
+    ):
+        if sigma_x <= 0:
+            raise ValueError("sigma_x must be positive")
         self.M = M
         self.ns = np.repeat(20, self.M)
         self.Ns = np.repeat(80, self.M)
         self.split_seed = split_seed
         self.additional_y_variance = 0.05
-        self.sigma_x = 0.1
+        self.sigma_x = float(sigma_x)
         self.good_f = good_f
 
         self.mean_y_f = lambda x: x ** 2
@@ -48,20 +58,37 @@ class GaussianSyntheticDataset(PasDataset):
         true_covs, true_vars, true_y_vars = [], [], []
 
         for i in range(self.M):
-            x_y_mean = np.array([mu_x_s[i], mu_y_s[i]])
-
-            adjusted_sigma_y = np.sqrt(
-                (slopes[i] * self.sigma_x)**2 + self.additional_y_variance)
-            # Keep regression slope intact
-            adjusted_cov_xy = slopes[i] * self.sigma_x**2
-
-            x_y_cov = np.array([[self.sigma_x**2, adjusted_cov_xy],
-                                [adjusted_cov_xy, adjusted_sigma_y**2]])
-
             # using Monte-Carlo to calculate the true variances & covariancse (if `has_true_vars` is `True`)
             run_monte_carlo = self.has_true_vars and self.DEBUG_FLAG
             total_size = (self.ns[i] + self.Ns[i]) * 500 if run_monte_carlo else (self.ns[i] + self.Ns[i])
-            x_y = npr.multivariate_normal(x_y_mean, x_y_cov, total_size).T
+            if run_monte_carlo:
+                x_y_mean = np.array([mu_x_s[i], mu_y_s[i]])
+                adjusted_sigma_y = np.sqrt(
+                    (slopes[i] * self.sigma_x) ** 2
+                    + self.additional_y_variance
+                )
+                adjusted_cov_xy = slopes[i] * self.sigma_x**2
+                x_y_cov = np.array([
+                    [self.sigma_x**2, adjusted_cov_xy],
+                    [adjusted_cov_xy, adjusted_sigma_y**2],
+                ])
+                x_y = npr.multivariate_normal(
+                    x_y_mean, x_y_cov, total_size
+                ).T
+            else:
+                # Conditional form used by the paper reproduction scripts.
+                # It is the same bivariate Gaussian, but fixes the RNG order:
+                # first X, then the independent response noise.
+                x = npr.normal(mu_x_s[i], self.sigma_x, total_size)
+                epsilon = npr.normal(
+                    0, np.sqrt(self.additional_y_variance), total_size
+                )
+                y = (
+                    mu_y_s[i]
+                    + slopes[i] * (x - mu_x_s[i])
+                    + epsilon
+                )
+                x_y = np.vstack([x, y])
             # apply predictions
             total_preds = self.pred_f(x_y[0, :])
 

@@ -27,6 +27,8 @@ if __name__ == "__main__":
     # m = 200 problems, n_j = 20, N_j = 80: the Table 2 / Figure 3 configuration.
     # Flip `good_f` to False for the flawed predictor f_2(x) = |x| column.
     dataset = GaussianSyntheticDataset(
-        good_f=True, M=200, has_true_vars=True, split_seed=4321)
+        good_f=True, M=200, has_true_vars=True, split_seed=4321,
+        sigma_x=0.2,
+    )
     mse_results = run_benchmark(
         dataset, trials=200, summary=True, estimator_kwargs=kwargs)

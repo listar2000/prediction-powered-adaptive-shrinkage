@@ -7,8 +7,8 @@ the paper.
 Emits four tables: the post-fix Table 3 (nine estimator rows against three
 dataset column-pairs, MSE and %% Improved) and the post-fix Table 2 (seven rows,
 two synthetic predictors, MSE only), each followed by its published counterpart
-for reference. The published Table 3 values are not directly comparable -- see
-the note in the document.
+for reference. Neither published table is directly comparable to its revised
+counterpart; see the note in the document.
 
 Usage (from repo root)::
 
@@ -178,8 +178,10 @@ PREAMBLE = r"""% Standalone render of the post-fix PAS results (Tables 2 and 3).
 \begin{center}
 {\large\bfseries PAS Tables 2 and 3, recomputed after the estimator and pseudo-ground-truth fixes}\\[3pt]
 {\small $K = 200$ replicates. Real data: default split seed (42; replicate $k$ uses seed $42+k$), \texttt{train\_test\_split} $=0.2$.
-Synthetic: $m = 200$, $n_j = 20$, $N_j = 80$, split seed 4321.
-Second moments per problem throughout (\texttt{share\_var=False}).}
+Synthetic: $m = 200$, $n_j = 20$, $N_j = 80$, split seed 4321, with corrected
+analytical true second moments (no Monte Carlo moment approximation), $c=0.05$,
+and $\psi=0.2$.
+Real-data second moments are per problem (\texttt{share\_var=False}).}
 \end{center}
 """
 
@@ -193,13 +195,15 @@ comparable row-for-row with the published Table~3.} The pseudo-ground-truth now
 averages \emph{all} labels for a problem (Appendix~E.4, $\dot\theta_j :=
 T_j^{-1}\sum_i \dot Y_{ij}$) instead of the unlabelled split only, so every
 estimator is evaluated against a different pseudo ground-truth. The synthetic
-table is unaffected by that change and \emph{is} directly comparable, since
-$\theta_j = \eta_j^2$ is known exactly there.
+target $\theta_j = \eta_j^2$ remains known exactly, but the revised experiment
+uses $\psi=0.2$ rather than the published $\psi=0.1$, so its published table is
+also included only as a reference.
 
-\noindent\textbf{Second moments.} All cells use the per-problem estimators of
-Appendix~C.1, reported as \texttt{share\_var=False} --- the configuration behind
-the paper's numbers. On the synthetic model the second moments are known in
-closed form (Appendix~E.1), so that choice does not arise.
+\noindent\textbf{Second moments.} All real-data cells use the per-problem
+estimators of Appendix~C.1, reported as \texttt{share\_var=False} --- the
+configuration behind the paper's numbers. On the synthetic model the true
+second moments are evaluated from their corrected closed forms (Appendix~E.1),
+without a Monte Carlo moment approximation, so that choice does not arise.
 \textbf{Bolding} marks the best value in each column.
 }
 """
@@ -231,9 +235,10 @@ def main() -> None:
             _collect(summary, real, ROWS),
             caption=(
                 f"Post-fix Table 3: results aggregated over $K = {trials}$ replicates "
-                r"on the three real-world datasets --- Amazon review ratings with "
-                r"\texttt{BERT-base} and \texttt{BERT-tuned} predictors, and spiral "
-                r"galaxy fractions with a \texttt{ResNet50} predictor. Metrics are "
+                r"on two real-world datasets with three predictor settings --- "
+                r"Amazon review ratings with \texttt{BERT-base} and \texttt{BERT-tuned} "
+                r"predictors, and spiral galaxy fractions with a \texttt{ResNet50} "
+                r"predictor. Metrics are "
                 r"reported with $\pm$ 1 standard error."
             ),
             label="tbl:postfix_real", order=real, rows=ROWS,
@@ -254,7 +259,9 @@ def main() -> None:
             caption=(
                 f"Post-fix Table 2: MSE over $K = {trials}$ replicates of the "
                 r"synthetic model with the good predictor $f_1(x) = x^2$ and the "
-                r"flawed predictor $f_2(x) = |x|$. UniPT/UniPAS are omitted, as in "
+                r"flawed predictor $f_2(x) = |x|$, using $m=200$ and the corrected "
+                r"analytical true second moments, $c=0.05$, and $\psi=0.2$. "
+                r"UniPT/UniPAS are omitted, as in "
                 r"the paper, since the second moments are known here. Metrics are "
                 r"reported with $\pm$ 1 standard error."
             ),
@@ -263,7 +270,10 @@ def main() -> None:
         ))
         reference.append(make_table(
             _published_cells(synth, SYNTHETIC_ROWS),
-            caption=r"\emph{Reference only:} the published Table 2.",
+            caption=(
+                r"\emph{Reference only:} the published Table 2, which used "
+                r"$\psi=0.1$ rather than the revised $\psi=0.2$."
+            ),
             label="tbl:published_synthetic", order=synth, rows=SYNTHETIC_ROWS,
             with_improved=False,
         ))

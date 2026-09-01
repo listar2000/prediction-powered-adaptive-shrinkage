@@ -1,9 +1,13 @@
-# Post-fix reproduction of PAS Tables 2 and 3
+# Post-fix reproduction of PAS Tables 2, 3, and Figure 3
 
 Re-runs the PAS paper's benchmarks after the code corrections found by comparing
 the implementation against the camera-ready appendices. Produces the paper's
-Table 3 (real data) and Table 2 (synthetic model), each alongside its published
-counterpart for reference.
+Table 3 (real data), Table 2 (synthetic model), and Figure 3 (synthetic-model
+power-tuning and adaptive-shrinkage parameters). It also produces a diagnostic
+plot of the per-problem PT variances that determine Figure 3's localized
+shrinkage weights, plus a broken-axis rendering of the shrinkage weights so
+their within-predictor trends remain visible. The tables include their published
+counterparts for reference.
 
 ## Reproduce
 
@@ -19,17 +23,41 @@ uv run python src/scripts/post-fix/run_post_fix_tables.py --trials 200 --num-wor
 uv run python src/scripts/post-fix/make_latex_tables.py
 ```
 
+Figure 3 can also be regenerated independently (it does not require the
+real-world data files):
+
+```bash
+uv run python src/scripts/paper_plots/plot_synthetic_params.py
+```
+
 Real-data configuration matches Appendix E.4: `K = 200` replicates, dataset
 default split seed (42; replicate *k* uses seed 42 + *k*),
 `train_test_split = 0.2`. Synthetic configuration matches Table 2 / Figure 3:
-`m = 200`, `n_j = 20`, `N_j = 80`, split seed 4321. The five dataset cells run as
-independent subprocesses; each builds its own dataset rather than pickling one
-across the process boundary.
+`m = 200`, `n_j = 20`, `N_j = 80`, covariate standard deviation `psi = 0.2`,
+additional response variance `c = 0.05`, and split seed 4321. The five dataset cells run as independent subprocesses; each
+builds its own dataset rather than pickling one across the process boundary.
 
-Second moments are per problem (Appendix C.1) everywhere, reported in the tables
-as `share_var=False` — the configuration behind the paper's numbers. On the
-synthetic model the moments are known in closed form (Appendix E.1), so the
+Second moments are per problem (Appendix C.1) on the real datasets, reported in
+the tables as `share_var=False` — the configuration behind the paper's numbers.
+On the synthetic model the true moments are evaluated from the corrected closed
+forms (Appendix E.1), rather than approximated with Monte Carlo draws, so the
 choice does not arise there.
+
+The PT, shrink-average, and PAS rows use the unrestricted per-problem
+`lambda_j^*` in Eq. (13). The general estimator API retains clipping as a
+defensive default, so the reproduction scripts pass `clip_lambda=False`
+explicitly. UniPT and UniPAS are intentionally different: their one shared
+power-tuning parameter remains clipped to `[0, 1]`, as specified in Appendix
+C.2.
+
+To rerun only the two synthetic cells while preserving the existing real-data
+results in the combined output, use:
+
+```bash
+uv run python src/scripts/post-fix/run_post_fix_tables.py \
+  --datasets synthetic_f1 synthetic_f2 --preserve-unselected --num-workers 2
+uv run python src/scripts/post-fix/make_latex_tables.py
+```
 
 ## Outputs
 
@@ -38,6 +66,11 @@ choice does not arise there.
 | `post_fix_tables.pdf` | Standalone 2-page render: post-fix Tables 3 and 2 + note, published counterparts on p. 2 |
 | `post_fix_tables.tex` | Source for the above |
 | `post_fix_tables_bodies.tex` | Bare `table` environments, for pasting into the paper |
+| `../../../images/synthetic_params.pdf` | Post-fix Figure 3, with 200 problems for each predictor |
+| `../../../images/synthetic_omegas_zoomed.pdf` | Broken-axis close-up of Figure 3's problem-level adaptive shrinkage weights |
+| `../../../images/synthetic_variances.pdf` | Diagnostic plot of the per-problem $\tilde\sigma_j^2=\operatorname{Var}(\hat\theta_j^{\mathrm{PT}})$ values used to localize shrinkage |
+| `results/synthetic_params.csv` | The 400 plotted rows and their $\eta_j$, $\hat\lambda_j$, $\hat\omega_j$, and $\tilde\sigma_j^2$ values |
+| `results/synthetic_variances.csv` | The four columns used by the PT-variance diagnostic plot |
 | `results/summary.csv` | One row per (dataset, estimator) with mean and SE |
 | `results/raw_*.csv` | Per-replicate MSE and %-improved values |
 | `results/meta.json` | Run configuration |
@@ -93,12 +126,16 @@ Table 3.** Fix 6 changes the estimand from the mean of the unlabelled responses
 to the mean of all responses, so every estimator is evaluated against a
 different pseudo ground-truth.
 
-**The synthetic table is directly comparable**, since `θ_j = η_j²` is known
-exactly there and none of the fixes touch it.
+**The synthetic table also has a different configuration.** Its target remains
+known exactly as `θ_j = η_j²`, but the revised experiment changes `psi` from
+0.1 to 0.2. The published Table 2 is therefore retained only as a reference.
 
 **Which estimators take a moment argument.** PT, Shrink Classical, Shrink Avg and
 PAS do: the paper assumes their second moments known, so the plug-in used in
-practice is an implementation choice it does not specify. UniPT and UniPAS
-deliberately expose no such argument — Appendix C.2/C.3 and Algorithm 2 fix their
-moment handling, making it part of the estimator's definition rather than a knob.
-Classical, Prediction Avg and PPI have no second-moment estimate at all.
+practice is an implementation choice it does not specify. PT, Shrink Avg, and
+PAS also take `clip_lambda`; the reproduction uses the unrestricted Eq. (13)
+setting. UniPT and UniPAS deliberately expose neither argument — Appendix
+C.2/C.3 and Algorithm 2 fix their moment handling and clip their shared
+power-tuning parameter, making those choices part of the estimator's definition
+rather than knobs. Classical, Prediction Avg and PPI have no second-moment
+estimate at all.

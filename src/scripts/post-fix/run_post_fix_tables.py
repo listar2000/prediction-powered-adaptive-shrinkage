@@ -10,12 +10,16 @@ Re-runs the paper's benchmarks after the code corrections described in
   changes the estimand, so every estimator is evaluated against a different
   target (see the README).
 - **Table 2** (synthetic): seven estimator rows x two predictors
-  (f1(x) = x^2, f2(x) = |x|), m = 200, n_j = 20, N_j = 80. Second moments are
-  known in closed form here, so this table is directly comparable with the
-  published one.
+  (f1(x) = x^2, f2(x) = |x|), m = 200, n_j = 20, N_j = 80. The true second
+  moments are evaluated from their corrected closed forms rather than by Monte
+  Carlo. The revised experiment uses psi = 0.2 rather than the published
+  psi = 0.1, so the published table is included only as a reference.
 
 Every cell uses per-problem second moments (Appendix C.1), which the tables
 report as ``share_var=False`` -- the configuration behind the paper's numbers.
+The per-problem PT, shrink-average, and PAS rows use the unrestricted
+problem-level power-tuning parameter in Eq. (13). UniPT and UniPAS retain the
+explicit ``[0, 1]`` clipping in Appendix C.2.
 Each dataset is an independent job, so they run in parallel subprocesses;
 datasets are constructed inside the worker rather than pickled across the
 process boundary.
@@ -64,6 +68,12 @@ ROWS = [
 # experiments, as they are specifically designed for settings where the second
 # moments are unknown".
 SYNTHETIC_ROWS = [row for row in ROWS if row[1] not in {"uni_pt", "uni_pas"}]
+
+# Eq. (13) does not constrain the per-problem lambda_j^*. All paper rows whose
+# first stage is that estimator therefore opt out of the library's defensive
+# PPI++-style clipping. The single shared lambda in UniPT/UniPAS remains clipped
+# exactly as specified in Appendix C.2.
+UNCLIPPED_PT_ROWS = {"pt", "shrinkage_mean", "pas"}
 
 REAL_DATASETS = {
     "amazon_base": "Amazon (base f)",
@@ -114,8 +124,8 @@ PUBLISHED = {
     },
 }
 
-# Published Table 2 (synthetic), as (mse_mean, mse_se). The paper reports no
-# "% Improved" column for the synthetic study.
+# Published Table 2 at psi=0.1, as (mse_mean, mse_se). The paper reports no
+# "% Improved" column for the synthetic study. The revised run uses psi=0.2.
 PUBLISHED_SYNTHETIC = {
     "synthetic_f1": {
         "mle": (3.142, 0.033), "pred_mean": (0.273, 0.004),
@@ -145,10 +155,14 @@ def build_dataset(key: str):
     if key == "galaxy":
         return GalaxyZooDataset()
     if key in SYNTHETIC_DATASETS:
-        # Table 2 / Figure 3 configuration; second moments known in closed form.
+        # Table 2 / Figure 3 configuration. Select the analytical path
+        # explicitly: DEBUG_FLAG=True is the legacy 50k-draw Monte Carlo
+        # approximation retained as the dataset-wide default for backwards
+        # reproducibility, whereas Table 2 now uses the corrected closed forms.
+        GaussianSyntheticDataset.DEBUG_FLAG = False
         return GaussianSyntheticDataset(
             good_f=(key == "synthetic_f1"), M=200,
-            has_true_vars=True, split_seed=4321,
+            has_true_vars=True, split_seed=4321, sigma_x=0.2,
         )
     raise ValueError(f"unknown dataset {key!r}")
 
@@ -172,11 +186,16 @@ def run_cell(args) -> dict:
     estimators = {key: ALL_ESTIMATORS[key] for _, key in rows}
     # UniPT / UniPAS deliberately take no moment argument: Appendix C.2 / C.3
     # fix their moment handling, so it is part of the estimator, not a knob.
-    estimator_kwargs = {
-        key: {"moments": MOMENTS}
-        for key, func in estimators.items()
-        if _accepts(func, "moments")
-    }
+    estimator_kwargs = {}
+    for key, func in estimators.items():
+        kwargs = {}
+        if _accepts(func, "moments"):
+            kwargs["moments"] = MOMENTS
+        if key in UNCLIPPED_PT_ROWS:
+            assert _accepts(func, "clip_lambda")
+            kwargs["clip_lambda"] = False
+        if kwargs:
+            estimator_kwargs[key] = kwargs
 
     dataset = build_dataset(dataset_key)
     frame = run_benchmark(
@@ -209,6 +228,7 @@ def run_cell(args) -> dict:
         "M": int(dataset.M),
         "moments": MOMENTS,
         "moments_applied_to": sorted(estimator_kwargs),
+        "unclipped_pt_rows": sorted(UNCLIPPED_PT_ROWS & set(estimators)),
         "records": records,
         "raw": frame.astype(float).to_dict(orient="list"),
     }
@@ -271,6 +291,12 @@ def main() -> None:
                         default=sorted(DATASET_LABELS))
     parser.add_argument("--num-workers", type=int, default=5)
     parser.add_argument("--out-dir", type=Path, default=HERE / "results")
+    parser.add_argument(
+        "--preserve-unselected",
+        action="store_true",
+        help="Keep rows and raw files for datasets not named by --datasets. "
+             "This supports rerunning only Table 2 while retaining Table 3.",
+    )
     args = parser.parse_args()
 
     jobs = [(d, args.trials) for d in args.datasets]
@@ -293,12 +319,18 @@ def main() -> None:
             print(f"  done: {dataset_key} (M={payload['M']})", flush=True)
 
     summary = pd.DataFrame([r for p in results for r in p["records"]])
+    summary_path = args.out_dir / "summary.csv"
+    if args.preserve_unselected and summary_path.exists():
+        previous = pd.read_csv(summary_path)
+        previous = previous[~previous["dataset"].isin(args.datasets)]
+        summary = pd.concat([previous, summary], ignore_index=True)
     summary = summary.sort_values(["dataset", "estimator"])
-    summary.to_csv(args.out_dir / "summary.csv", index=False)
+    summary.to_csv(summary_path, index=False)
 
     print()
-    real = {k: v for k, v in REAL_DATASETS.items() if k in args.datasets}
-    synth = {k: v for k, v in SYNTHETIC_DATASETS.items() if k in args.datasets}
+    present = set(summary["dataset"])
+    real = {k: v for k, v in REAL_DATASETS.items() if k in present}
+    synth = {k: v for k, v in SYNTHETIC_DATASETS.items() if k in present}
     if real:
         print(render_text_table(summary, real, ROWS,
                                 "Table 3 (real data), share_var=False"))
@@ -312,9 +344,12 @@ def main() -> None:
     with open(args.out_dir / "meta.json", "w") as fh:
         json.dump({
             "trials": args.trials,
-            "datasets": args.datasets,
+            "datasets": [k for k in DATASET_LABELS if k in present],
             "moments": MOMENTS,
             "moments_applied_to": results[0]["moments_applied_to"],
+            "unclipped_pt_rows": sorted(UNCLIPPED_PT_ROWS),
+            "unipt_unipas_lambda": "clipped to [0, 1] per Appendix C.2",
+            "synthetic_moment_source": "corrected analytical closed forms",
             "table3_rows": [k for _, k in ROWS],
             "table2_rows": [k for _, k in SYNTHETIC_ROWS],
             "split_seed": "dataset default (42 real, 4321 synthetic); "

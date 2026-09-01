@@ -9,6 +9,8 @@ if __name__ == "__main__":
     }
     # Run CI benchmark on synthetic data (m = 200, as in Table 2 / Figure 3)
     dataset = GaussianSyntheticDataset(
-        good_f=True, M=200, has_true_vars=True, split_seed=4321)
+        good_f=True, M=200, has_true_vars=True, split_seed=4321,
+        sigma_x=0.2,
+    )
     ci_results = run_ci_benchmark(
         dataset, trials=200, alpha=0.1, summary=True, ci_kwargs=kwargs)
