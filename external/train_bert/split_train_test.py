@@ -1,81 +1,108 @@
-"""
-Script that does the following:
+"""Prepare a deterministic product holdout, pinned BERT model, and token cache.
 
-1. Load Reviews.csv from external/assets.
-2. Group the data by the `ProductId` column.
-3. Use the 200 products with the highest number of reviews for evaluation.
-4. Remove rows with missing `Summary`, `Text`, and `Score` fields.
-5. Store product metadata in the parquet files alongside the reviews.
-6. Save all other products to train.parquet and the top products to eval.parquet.
+Run download_and_dedup_data.py first. This CPU-only step preserves all reviews,
+including empty titles and literal 'NA' strings, and orders each split by row Id.
 """
-
+import argparse
+import json
 from pathlib import Path
+import time
 
-import pandas as pd
-
-
-# determine how many products to save for evaluation
-N = 200
-RANDOM_STATE = 123456
-
-ASSETS_DIR = Path(__file__).resolve().parents[1] / "assets"
-REVIEWS_PATH = ASSETS_DIR / "Reviews.csv"
-TRAIN_DATA_PATH = ASSETS_DIR / "train.parquet"
-EVAL_DATA_PATH = ASSETS_DIR / "eval.parquet"
+from common import (ASSETS_DIR, MODEL_NAME, MODEL_REVISION, MAX_LENGTH,
+                    prepared_manifest, save_json, sha256)
 
 
-def shuffle_data(dataframe):
-    return (
-        dataframe.groupby("ProductId", group_keys=False, sort=False)
-        .sample(frac=1.0, random_state=RANDOM_STATE)
-        .reset_index(drop=True)
-    )
+def partition_reviews(frame, holdout_products=200):
+    """Rank by review count, break ties by ProductId, and retain original row IDs."""
+    import numpy as np
+
+    if not frame["Id"].is_unique:
+        raise ValueError("Review Id values must be unique")
+    if not frame["Score"].isin(range(1, 6)).all():
+        raise ValueError("Review scores must be integer ratings from 1 to 5")
+    if frame.duplicated(["Summary", "Text", "Score", "UserId"]).any():
+        raise ValueError("Run download_and_dedup_data.py before preparing the splits")
+    counts = frame.groupby("ProductId").size().rename("reviews").reset_index()
+    counts = counts.sort_values(["reviews", "ProductId"], ascending=[False, True])
+    if not 0 < holdout_products < len(counts):
+        raise ValueError("Holdout size must leave at least one training product")
+    heldout = counts.head(holdout_products).ProductId.tolist()
+    is_heldout = frame.ProductId.isin(heldout)
+    partitions = {"train": frame[~is_heldout].copy(), "eval": frame[is_heldout].copy()}
+    for name, part in partitions.items():
+        part = part.sort_values("Id").reset_index(drop=True)
+        part["review_index"] = np.arange(len(part))
+        part["Number of Reviews"] = part.ProductId.map(frame.groupby("ProductId").size())
+        partitions[name] = part
+    return partitions, counts, heldout
 
 
-def split_train_test():
-    # 1. Load the Reviews.csv file with pandas
-    df = pd.read_csv(REVIEWS_PATH)
+def main(args):
+    from datasets import Dataset, DatasetDict
+    from huggingface_hub import snapshot_download
+    import numpy as np
+    import pandas as pd
+    from transformers import AutoTokenizer
 
-    # 2. Group the data by the `ProductId` column
-    grouped = df.groupby("ProductId")
-
-    # 4. Remove rows with missing `Summary`, `Text`, and `Score` fields
-    df_cleaned = df.dropna(subset=["Summary", "Text", "Score"])
-
-    # Regroup after cleaning the data
-    grouped_cleaned = df_cleaned.groupby("ProductId")
-    product_review_counts = grouped_cleaned.size()
-
-    # 3. Find the top-N products with the highest number of reviews
-    top_n_products = product_review_counts.nlargest(N).index
-
-    # Keep the former metadata fields in each parquet row. Parquet compression keeps
-    # the repeated review count compact while allowing eval groups to be reconstructed.
-    df_cleaned = df_cleaned.copy()
-    df_cleaned["Number of Reviews"] = df_cleaned["ProductId"].map(
-        product_review_counts
-    )
-    output_columns = [
-        "ProductId",
-        "Number of Reviews",
-        "Summary",
-        "Text",
-        "Score",
-    ]
-
-    # 6. Save the top products together in the evaluation parquet
-    eval_data = shuffle_data(df_cleaned[df_cleaned["ProductId"].isin(top_n_products)])
-
-    # Save reviews for all other products from the cleaned dataframe
-    train_data = shuffle_data(df_cleaned[~df_cleaned["ProductId"].isin(top_n_products)])
-
-    ASSETS_DIR.mkdir(parents=True, exist_ok=True)
-    train_data.to_parquet(TRAIN_DATA_PATH, index=False)
-    eval_data.to_parquet(EVAL_DATA_PATH, index=False)
-
-    print(f"Training data saved to '{TRAIN_DATA_PATH}'.")
-    print(f"Evaluation data saved to '{EVAL_DATA_PATH}'.")
+    root = args.root.resolve()
+    started = time.perf_counter()
+    source = (args.source or root / "Reviews.csv").resolve()
+    source_hash = sha256(source)
+    out = root / "prepared"
+    if (out / "manifest.json").exists():
+        manifest = prepared_manifest(root)
+        if manifest["source_sha256"] != source_hash or manifest["eval_products"] != args.holdout_products:
+            raise ValueError("Existing preparation uses different inputs; choose a fresh --root")
+        if not (root / "base_model/config.json").is_file():
+            raise FileNotFoundError("Prepared base model is missing; choose a fresh --root")
+        print(json.dumps(manifest, indent=2), flush=True)
+        return
+    if out.exists() and any(out.iterdir()):
+        raise ValueError("Incomplete preparation exists; choose a fresh --root or remove its prepared/ directory")
+    if args.tokenizer_workers < 1:
+        raise ValueError("--tokenizer-workers must be positive")
+    out.mkdir(parents=True, exist_ok=True)
+    # Preserve strings such as "NA" and empty titles; do not silently drop reviews.
+    frame = pd.read_csv(source, keep_default_na=False,
+                        dtype={"ProductId": str, "UserId": str, "Summary": str, "Text": str})
+    partitions, counts, heldout = partition_reviews(frame, args.holdout_products)
+    snapshot_download(MODEL_NAME, revision=MODEL_REVISION, local_dir=root / "base_model",
+                      allow_patterns=["config.json", "tokenizer*", "vocab.txt", "special_tokens_map.json", "pytorch_model.bin", "model.safetensors"])
+    tokenizer = AutoTokenizer.from_pretrained(root / "base_model", use_fast=True)
+    tokenized = {}
+    lengths = {}
+    for name, part in partitions.items():
+        part.to_parquet(out / f"{name}.parquet", index=False)
+        text = (part.Summary + ". " + part.Text).tolist()
+        dataset = Dataset.from_dict({"text": text, "labels": (part.Score - 1).tolist(),
+                                     "review_index": part.review_index.tolist()})
+        def encode(batch):
+            values = tokenizer(batch["text"], truncation=True, max_length=MAX_LENGTH, padding=False)
+            values["length"] = [len(x) for x in values["input_ids"]]
+            return values
+        dataset = dataset.map(encode, batched=True, batch_size=1024, num_proc=args.tokenizer_workers,
+                              remove_columns=["text"], desc=f"Tokenize {name}")
+        tokenized[name] = dataset
+        lens = np.array(dataset["length"])
+        lengths[name] = {"mean": float(lens.mean()), "p50": float(np.median(lens)),
+                         "p90": float(np.percentile(lens, 90)), "at_max_length": int((lens == MAX_LENGTH).sum())}
+    DatasetDict(tokenized).save_to_disk(out / "tokens")
+    counts.to_csv(out / "product_counts.csv", index=False)
+    manifest = {"source_path": str(source), "source_sha256": source_hash,
+                "model_name": MODEL_NAME, "model_revision": MODEL_REVISION,
+                "train_rows": len(partitions["train"]), "eval_rows": len(partitions["eval"]),
+                "train_products": int(partitions["train"].ProductId.nunique()), "eval_products": args.holdout_products,
+                "heldout_products": heldout, "lengths": lengths, "max_length": MAX_LENGTH,
+                "parquet_sha256": {n: sha256(out / f"{n}.parquet") for n in partitions},
+                "preparation_seconds": time.perf_counter() - started}
+    save_json(out / "manifest.json", manifest)
+    print(json.dumps(manifest, indent=2), flush=True)
 
 
 if __name__ == "__main__":
-    split_train_test()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--root", type=Path, default=ASSETS_DIR)
+    parser.add_argument("--source", type=Path, help="Deduplicated Reviews.csv (default: ROOT/Reviews.csv)")
+    parser.add_argument("--holdout-products", type=int, default=200)
+    parser.add_argument("--tokenizer-workers", type=int, default=8)
+    main(parser.parse_args())

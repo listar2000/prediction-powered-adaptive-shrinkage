@@ -1,7 +1,21 @@
 #!/usr/bin/env python3
 """Download and deduplicate all SNAP Amazon Fine Foods reviews before splitting.
 
-Uses only the Python standard library. See README.md for the selection rules.
+Apply the following policy to the entire corpus, before selecting top products:
+
+1. Merge products whose complete sets of review identities are identical.
+2. For sparse overlaps, remove each shared review from every product sharing it.
+3. For large overlaps, drop the product with fewer distinct reviews instead.
+
+A review identity is the exact (title, text, rating, user ID) quadruple. Repeated
+identities within a product are collapsed when loading the corpus. The overlap
+cutoff is configurable with --large-overlap-threshold (default: 10 shared
+reviews); large means strictly above this cutoff, not a fraction of product size.
+
+Execution order is 1, 3, 2: resolve large overlaps before deleting shared reviews,
+then remove all remaining sharing among retained products. This preserves the
+reviews belonging only to retained products after their overlapping peer is
+dropped. Uses only the Python standard library.
 """
 
 from __future__ import annotations
@@ -156,14 +170,17 @@ def count_summary(counts) -> dict:
 
 
 def deduplicate(corpus: Corpus, large_overlap_threshold: int = 10) -> Deduplication:
-    """Merge equal sets, drop large-overlap products, remove all residual sharing.
+    """Apply the three policies above, resolving large overlaps before sparse ones.
 
-    Large means strictly more than the threshold, measured BEFORE removing shared
-    rows. Products are considered by decreasing distinct-review count, breaking
-    ties by ascending ProductId. Only previously kept products can cause a drop.
+    Equal review sets keep the lexicographically smallest ProductId and its
+    metadata. Large overlaps are measured before shared-review removal, considering
+    products by decreasing distinct-review count, then ascending ProductId for
+    ties. Only previously retained products can cause another product to be dropped.
     """
     if large_overlap_threshold < 0:
         raise ValueError("large_overlap_threshold must be nonnegative")
+
+    # Step 1: merge products with identical complete review sets.
     canonical: dict[str, str] = {}
     signatures: dict[frozenset[int], str] = {}
     representatives: dict[str, dict[int, Metadata]] = {}
@@ -175,7 +192,8 @@ def deduplicate(corpus: Corpus, large_overlap_threshold: int = 10) -> Deduplicat
             representatives[product] = corpus.products[product]
     del signatures
 
-    # An inverted index avoids comparing all pairs of the ~74,000 input products.
+    # Step 3: resolve large overlaps first, retaining the larger product.
+    # The review-to-product index avoids comparing every pair of products.
     owners: dict[int, list[str]] = defaultdict(list)
     kept: dict[str, dict[int, Metadata]] = {}
     dropped: dict[str, tuple[str, int]] = {}
@@ -195,13 +213,23 @@ def deduplicate(corpus: Corpus, large_overlap_threshold: int = 10) -> Deduplicat
             for review_id in reviews:
                 owners[review_id].append(product)
 
+    # Step 2: remove shared reviews from ALL remaining owners, not just one copy.
+    # Each retained pair shares at most the cutoff; a product's total removal
+    # across multiple overlapping peers can still exceed that cutoff.
     shared = {review_id for review_id, products in owners.items() if len(products) > 1}
-    sparse_removed = {p: sum(r in shared for r in reviews) for p, reviews in kept.items()}
-    final = {p: {r: metadata for r, metadata in reviews.items() if r not in shared}
-             for p, reviews in kept.items()}
+    sparse_removed = {
+        product: sum(review_id in shared for review_id in reviews)
+        for product, reviews in kept.items()
+    }
+    final = {
+        product: {review_id: metadata for review_id, metadata in reviews.items()
+                  if review_id not in shared}
+        for product, reviews in kept.items()
+    }
     empty_products = sum(not reviews for reviews in final.values())
     final = {p: reviews for p, reviews in final.items() if reviews}
 
+    # Validate global uniqueness and account for every removed row and product.
     raw_rows = sum(corpus.raw_counts.values())
     unique_within_rows = sum(map(len, corpus.products.values()))
     merged_rows = sum(map(len, representatives.values()))

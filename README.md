@@ -51,6 +51,7 @@ You should then see a progress bar as we simulate many repeated runs. After that
     - `run_synthetic_ci.py`: Synthetic dataset CI experiments
     - `run_timing_benchmark.py`: Timing benchmark script
 - `data/`: Directory for storing datasets
+- `external/train_bert/`: [Amazon deduplication, BERT training on 1–8 GPUs, and prediction instructions](external/train_bert/README.md)
 - `requirements.txt`: Python package dependencies
 
 ## A Unified Dataset Interface

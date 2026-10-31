@@ -1,131 +1,138 @@
-"""
-Make predictions of review ratings using either the original (bad) BERT model or
-the fine-tuned model. Ground-truth and predicted ratings are stored by ProductId
-in HDF5 files under external/assets.
-"""
-
+"""Evaluate base/epoch checkpoints on the same product holdout; save aligned HDF5/parquet."""
 import argparse
+import gc
+import json
+import os
+from pathlib import Path
+import time
 
+from common import (ASSETS_DIR, SEED, configure_cuda, environment, prepared_manifest,
+                    save_json, seed_everything, sha256)
+
+from datasets import load_from_disk
 import h5py
+import numpy as np
 import pandas as pd
 import torch
-from torch.utils.data import DataLoader, Dataset
-from tqdm import tqdm
-from transformers import AutoModelForSequenceClassification, AutoTokenizer
-
-from train_bert import (
-    ASSETS_DIR,
-    EVAL_DATA_PATH,
-    FINETUNED_MODEL_DIR,
-    PRETRAINED_MODEL_DIR,
-    download_original_model_if_needed,
-)
+from transformers import (AutoModelForSequenceClassification, AutoTokenizer,
+                          DataCollatorWithPadding, Trainer, TrainingArguments)
 
 
-BATCH_SIZE = 128
-OUTPUT_FILES = {
-    "bad": ASSETS_DIR / "predict_bad.h5",
-    "finetuned": ASSETS_DIR / "predict_finetuned.h5",
-}
-
-
-class InferenceDataset(Dataset):
-    def __init__(self, encodings):
-        self.encodings = encodings
-
-    def __len__(self):
-        return len(self.encodings["input_ids"])
-
-    def __getitem__(self, idx):
-        return {key: tensor[idx] for key, tensor in self.encodings.items()}
-
-
-def get_predictions(model_type):
-    """Generate predictions from either the original or fine-tuned model."""
-    if model_type not in OUTPUT_FILES:
-        raise ValueError(f"Unknown model type: {model_type}")
-
-    download_original_model_if_needed()
-    model_dir = (
-        PRETRAINED_MODEL_DIR if model_type == "bad" else FINETUNED_MODEL_DIR
-    )
-    if not model_dir.exists():
-        raise FileNotFoundError(
-            f"Model directory '{model_dir}' does not exist. Run train_bert.py first."
+def main(args):
+    if args.per_device_batch < 1 or args.num_workers < 0:
+        raise ValueError("Batch size must be positive and worker count nonnegative")
+    if not 1 <= int(os.environ.get("WORLD_SIZE", "1")) <= 8:
+        raise ValueError("Use between 1 and 8 GPU processes")
+    precision = configure_cuda(args.precision)
+    root = Path(args.root).resolve()
+    run = root / "runs" / args.run_name
+    manifest = prepared_manifest(root)
+    training_config = json.loads((run / "run_config.json").read_text()) if (run / "run_config.json").exists() else {}
+    seed = training_config.get("seed", SEED) if args.seed is None else args.seed
+    if training_config and training_config["data_manifest"]["source_sha256"] != manifest["source_sha256"]:
+        raise ValueError("Training and evaluation were prepared from different source data")
+    seed_everything(seed, tf32=precision["tf32"])
+    checkpoints = {}
+    if any(name != "base" for name in args.models):
+        checkpoints = json.loads((run / "checkpoints.json").read_text())
+    models = {}
+    for name in args.models:
+        if name == "base":
+            models[name] = str(root / "base_model")
+        else:
+            # Resolve within this run so a downloaded run directory stays portable.
+            checkpoint = run / "checkpoints" / Path(checkpoints[name.removeprefix("epoch")]).name
+            if not checkpoint.is_dir():
+                raise FileNotFoundError(checkpoint)
+            models[name] = str(checkpoint)
+    tokenizer = AutoTokenizer.from_pretrained(root / "base_model", use_fast=True)
+    data = load_from_disk(root / "prepared/tokens")["eval"].sort("length")
+    review_indices = np.asarray(data["review_index"])
+    frame = pd.read_parquet(root / "prepared/eval.parquet")
+    assert len(frame) == manifest["eval_rows"] and frame.ProductId.nunique() == manifest["eval_products"]
+    assert sorted(review_indices.tolist()) == list(range(len(frame)))
+    inverse_order = np.argsort(review_indices)
+    summaries = {}
+    for name, model_path in models.items():
+        seed_everything(seed, tf32=precision["tf32"])
+        model = AutoModelForSequenceClassification.from_pretrained(model_path, attn_implementation="sdpa")
+        training_args = TrainingArguments(
+            output_dir=str(run / "evaluation_tmp"),
+            per_device_eval_batch_size=args.per_device_batch, **precision,
+            dataloader_num_workers=args.num_workers, dataloader_pin_memory=True,
+            dataloader_drop_last=False, seed=seed, data_seed=seed,
+            report_to="none", disable_tqdm=True,
+            ddp_find_unused_parameters=False,
         )
-
-    tokenizer = AutoTokenizer.from_pretrained(
-        str(PRETRAINED_MODEL_DIR), use_fast=True
-    )
-    model = AutoModelForSequenceClassification.from_pretrained(str(model_dir))
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model.to(device)
-    model.eval()
-
-    eval_df = pd.read_parquet(EVAL_DATA_PATH)
-    product_groups = eval_df.groupby("ProductId", sort=False)
-    print("Number of products:", product_groups.ngroups)
-
-    output_file = OUTPUT_FILES[model_type]
-    with h5py.File(output_file, "w") as output:
-        print(f"Starting {model_type} predictions for each product...")
-        for product_id, product_reviews in tqdm(
-            product_groups, total=product_groups.ngroups
-        ):
-            product_reviews = product_reviews.copy()
-            product_reviews["Summary"] = (
-                product_reviews["Summary"].fillna("").astype(str)
-            )
-            product_reviews["Text"] = (
-                product_reviews["Text"].fillna("").astype(str)
-            )
-            texts = (
-                product_reviews["Summary"] + ". " + product_reviews["Text"]
-            ).tolist()
-            true_scores = product_reviews["Score"].values
-
-            encodings = tokenizer(
-                texts,
-                truncation=True,
-                padding=True,
-                max_length=512,
-                return_tensors="pt",
-            )
-            dataset = InferenceDataset(encodings)
-            dataloader = DataLoader(dataset, batch_size=BATCH_SIZE)
-
-            predicted_scores = []
-            with torch.no_grad():
-                for batch in dataloader:
-                    batch = {key: value.to(device) for key, value in batch.items()}
-                    outputs = model(**batch)
-                    predictions = torch.argmax(outputs.logits, dim=-1) + 1
-                    predicted_scores.extend(predictions.cpu().numpy())
-
-            output.create_dataset(
-                name=str(product_id),
-                data=[true_scores, predicted_scores],
-                dtype="i",
-            )
-
-    print(f"Predictions saved in '{output_file}' file.")
-
-
-def parse_args():
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "model",
-        nargs="?",
-        choices=["bad", "finetuned", "both"],
-        default="both",
-        help="Model whose predictions should be generated (default: both).",
-    )
-    return parser.parse_args()
+        trainer = Trainer(model=model, args=training_args, processing_class=tokenizer,
+                          data_collator=DataCollatorWithPadding(tokenizer, pad_to_multiple_of=8))
+        if trainer.is_world_process_zero():
+            save_json(run / "prediction_config.json", {
+                "environment": environment(), "arguments": training_args.to_dict(),
+                "seed": seed, "models": models, "data_manifest": manifest,
+            })
+        started = time.perf_counter()
+        predictions = trainer.predict(data, metric_key_prefix=name)
+        if trainer.is_world_process_zero():
+            logits = np.asarray(predictions.predictions)[inverse_order]
+            labels = np.asarray(predictions.label_ids)[inverse_order]
+            assert logits.shape == (len(frame), 5)
+            assert np.array_equal(labels + 1, frame.Score.to_numpy())
+            assert np.isfinite(logits).all()
+            predicted = logits.argmax(axis=1) + 1
+            probabilities = np.exp(logits - logits.max(axis=1, keepdims=True))
+            probabilities /= probabilities.sum(axis=1, keepdims=True)
+            actual = frame.Score.to_numpy()
+            output = frame[["Id", "ProductId", "UserId", "review_index", "Score"]].copy()
+            output["prediction"] = predicted
+            output["expected_rating"] = probabilities @ np.arange(1, 6)
+            for i in range(5):
+                output[f"probability_{i+1}"] = probabilities[:, i]
+            output["correct"] = predicted == actual
+            output["squared_error"] = (predicted - actual) ** 2
+            folder = run / "predictions"
+            folder.mkdir(parents=True, exist_ok=True)
+            output.to_parquet(folder / f"{name}.parquet", index=False)
+            per_product = output.groupby("ProductId").agg(reviews=("Score", "size"), accuracy=("correct", "mean"), mse=("squared_error", "mean"))
+            per_product.to_csv(folder / f"{name}_per_product.csv")
+            with h5py.File(folder / f"{name}.h5", "w") as h5:
+                h5.attrs["checkpoint"] = name
+                h5.attrs["seed"] = seed
+                h5.attrs["rating_scale"] = "1-5 integer star ratings"
+                for product, part in output.groupby("ProductId", sort=True):
+                    h5.create_dataset(str(product), data=np.vstack([part.Score, part.prediction]), dtype="i")
+            confusion = np.zeros((5, 5), dtype=int)
+            np.add.at(confusion, (actual - 1, predicted - 1), 1)
+            summaries[name] = {
+                "checkpoint_path": model_path, "rows": len(frame), "products": int(frame.ProductId.nunique()),
+                "accuracy": float(np.mean(predicted == actual)),
+                "correct_reviews": int(np.sum(predicted == actual)),
+                "product_macro_accuracy": float(per_product.accuracy.mean()),
+                "mse": float(np.mean((predicted - actual) ** 2)),
+                "mae": float(np.mean(np.abs(predicted - actual))),
+                "confusion_matrix_true_rows_predicted_columns": confusion.tolist(),
+                "prediction_seconds": time.perf_counter() - started,
+                "evaluation_parquet_sha256": sha256(root / "prepared/eval.parquet"),
+                "trainer_metrics": predictions.metrics,
+            }
+            save_json(run / "evaluation_summary.json", summaries)
+            print(json.dumps({name: summaries[name]}, indent=2), flush=True)
+        del trainer, model, predictions
+        gc.collect()
+        torch.cuda.empty_cache()
+        if torch.distributed.is_initialized():
+            torch.distributed.barrier()
+    if torch.distributed.is_initialized():
+        torch.distributed.destroy_process_group()
 
 
 if __name__ == "__main__":
-    args = parse_args()
-    model_types = ["bad", "finetuned"] if args.model == "both" else [args.model]
-    for selected_model in model_types:
-        get_predictions(selected_model)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--root", type=Path, default=ASSETS_DIR)
+    parser.add_argument("--run-name", default="bert")
+    parser.add_argument("--models", nargs="+", choices=["base", "epoch1", "epoch2"], default=["base", "epoch1", "epoch2"])
+    parser.add_argument("--per-device-batch", type=int, default=128)
+    parser.add_argument("--precision", choices=["auto", "bf16", "fp16", "fp32"], default="auto")
+    parser.add_argument("--seed", type=int, help="Default: training run's seed, or 123456 for base-only evaluation")
+    parser.add_argument("--num-workers", type=int, default=2)
+    main(parser.parse_args())
