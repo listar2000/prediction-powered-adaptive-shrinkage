@@ -48,6 +48,13 @@ def main(args):
     started = time.perf_counter()
     source = (args.source or root / "Reviews.csv").resolve()
     source_hash = sha256(source)
+    cleanup = None
+    dedup_report = source.parent / "dedup_summary.json"
+    if dedup_report.exists():
+        cleanup = json.loads(dedup_report.read_text()).get("token_overlap")
+        if cleanup and (cleanup["output_csv_sha256"] != source_hash
+                        or cleanup["holdout_products"] != args.holdout_products):
+            raise ValueError("Token-cleanup metadata does not match this CSV or holdout size")
     out = root / "prepared"
     if (out / "manifest.json").exists():
         manifest = prepared_manifest(root)
@@ -66,6 +73,8 @@ def main(args):
     frame = pd.read_csv(source, keep_default_na=False,
                         dtype={"ProductId": str, "UserId": str, "Summary": str, "Text": str})
     partitions, counts, heldout = partition_reviews(frame, args.holdout_products)
+    if cleanup and set(heldout) != set(cleanup["heldout_product_ids"]):
+        raise ValueError("Prepared holdout differs from the token-cleanup holdout")
     snapshot_download(MODEL_NAME, revision=MODEL_REVISION, local_dir=root / "base_model",
                       allow_patterns=["config.json", "tokenizer*", "vocab.txt", "special_tokens_map.json", "pytorch_model.bin", "model.safetensors"])
     tokenizer = AutoTokenizer.from_pretrained(root / "base_model", use_fast=True)
@@ -95,6 +104,8 @@ def main(args):
                 "heldout_products": heldout, "lengths": lengths, "max_length": MAX_LENGTH,
                 "parquet_sha256": {n: sha256(out / f"{n}.parquet") for n in partitions},
                 "preparation_seconds": time.perf_counter() - started}
+    if cleanup:
+        manifest["token_overlap_cleanup"] = cleanup
     save_json(out / "manifest.json", manifest)
     print(json.dumps(manifest, indent=2), flush=True)
 

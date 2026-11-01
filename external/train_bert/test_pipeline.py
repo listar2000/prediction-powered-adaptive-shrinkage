@@ -1,11 +1,54 @@
 """CPU checks for batch arithmetic and the review-disjoint preparation contract."""
 
 import unittest
+from collections import Counter
 
 import pandas as pd
 
 from common import plan_batch
 from split_train_test import partition_reviews
+from download_and_dedup_data import Corpus, deduplicate, remove_token_overlaps
+
+
+class TokenOverlapTests(unittest.TestCase):
+    @staticmethod
+    def tokenizer(texts, **kwargs):
+        # A small deterministic tokenizer exercises the removal policy without downloads.
+        return {"input_ids": [[ord(c) for c in ' '.join(text.lower().split())][:kwargs['max_length']]
+                              for text in texts]}
+
+    def test_remove_both_sides_but_keep_different_author_or_rating(self):
+        keys = [("Review", "Good  food", 5, "same-user"),
+                ("review", "Good food", 5, "same-user"),
+                ("AUTHOR", "text", 5, "author-a"),
+                ("author", "text", 5, "author-b"),
+                ("RATING", "text", 5, "rating-user"),
+                ("rating", "text", 1, "rating-user"),
+                ("unique", "A", 1, "u1"), ("unique", "B", 2, "u2"),
+                ("unique", "C", 3, "u3"), ("unique", "D", 4, "u4")]
+        metadata = ("name", 0, 0, 1)
+        products = {"A": {r: metadata for r in [0, 2, 4, 6, 7, 8, 9]},
+                    "B": {r: metadata for r in [1, 3, 5]}}
+        corpus = Corpus(keys, products, Counter({p: len(r) for p, r in products.items()}))
+        result = deduplicate(corpus)
+        remove_token_overlaps(corpus, result, holdout_products=1, tokenizer=self.tokenizer)
+        self.assertEqual(set(result.products['A']), {2, 4, 6, 7, 8, 9})
+        self.assertEqual(set(result.products['B']), {3, 5})
+        report = result.summary['token_overlap']
+        self.assertEqual((report['eval_rows_removed'], report['train_rows_removed']), (1, 1))
+        self.assertEqual(len(report['pairs_excluded_for_author_or_rating_difference']), 2)
+        self.assertEqual(result.row_ids[('A', 2)], 2)
+        self.assertEqual(result.row_ids[('B', 3)], 9)
+
+    def test_reject_holdout_membership_change(self):
+        keys = [("A", "text", 5, "u"), ("a", "text", 5, "u"),
+                ("b", "text", 5, "v"), ("c", "text", 5, "w")]
+        metadata = ("name", 0, 0, 1)
+        products = {"B": {r: metadata for r in [0, 3]}, "A": {2: metadata}, "C": {1: metadata}}
+        corpus = Corpus(keys, products, Counter({p: len(r) for p, r in products.items()}))
+        result = deduplicate(corpus)
+        with self.assertRaisesRegex(ValueError, 'holdout'):
+            remove_token_overlaps(corpus, result, holdout_products=1, tokenizer=self.tokenizer)
 
 
 class BatchPlanningTests(unittest.TestCase):

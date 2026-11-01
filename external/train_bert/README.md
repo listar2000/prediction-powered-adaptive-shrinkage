@@ -42,6 +42,39 @@ python external/train_bert/split_train_test.py \
 8). Use a fresh `--root` when changing the dataset or holdout. A completed cache
 is reused only if its source checksum, split checksums, and settings match.
 
+### Optional cross-split token cleanup
+
+To also remove residual copies that BERT sees as identical inputs:
+
+```sh
+python external/train_bert/download_and_dedup_data.py \
+  --output-dir external/assets/token_clean --remove-token-overlap
+python external/train_bert/split_train_test.py --root external/assets/token_clean
+```
+
+Pass `--root external/assets/token_clean` to training and prediction as well.
+The flag runs after the three standard deduplication policies. It uses the pinned
+tokenizer on `Summary + ". " + Text`, truncated to 512 tokens, and removes **both
+sides** of cross-split matches whose token IDs, UserId, and Score agree. Timestamp
+need not agree. Matches with different authors or ratings are deliberately kept.
+This is a selective duplicate-review cleanup, not a guarantee that no identical
+model inputs remain across the split.
+
+The holdout is the top 200 products after standard deduplication. The cleanup
+refuses to proceed if removals would change membership of that set. Use the same
+`--holdout-products` value for both scripts when overriding 200. Review IDs and
+relative row order are preserved. `token_overlap_removed.csv` lists the removed
+rows; `dedup_summary.json` records the matched pairs and tokenizer revision.
+
+On the reference corpus this removes 18 training and 18 held-out reviews, leaving
+341,112 training and 52,706 held-out reviews. Two input-matching pairs with different
+authors or ratings remain by design. The flag is off by default; ordinary
+deduplication retains its previous behavior and standard-library-only dependency.
+The cleaned CSV SHA256 is
+`2971af7fd425b8a30ce241f0d1733b18555ef525bc561f90543477f07056f7e7`.
+With the same eight-H100 settings and seed as the reference run, measured holdout
+accuracies were 66.5693% (base), 75.9477% (epoch 1), and 76.6175% (epoch 2).
+
 ## Train and predict
 
 For eight GPUs, matching the reference training settings:

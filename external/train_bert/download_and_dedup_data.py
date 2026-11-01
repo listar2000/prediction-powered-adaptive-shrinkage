@@ -15,7 +15,12 @@ reviews); large means strictly above this cutoff, not a fraction of product size
 Execution order is 1, 3, 2: resolve large overlaps before deleting shared reviews,
 then remove all remaining sharing among retained products. This preserves the
 reviews belonging only to retained products after their overlapping peer is
-dropped. Uses only the Python standard library.
+dropped. The default pipeline uses only the Python standard library.
+
+Optionally, --remove-token-overlap removes both sides of cross-split matches
+whose BERT input tokens, author, and rating agree. The held-out products are
+selected after standard deduplication; the additional cleanup must preserve that
+product set. This option requires the training requirements and pinned tokenizer.
 """
 
 from __future__ import annotations
@@ -23,7 +28,7 @@ from __future__ import annotations
 import argparse
 from collections import Counter, defaultdict
 import csv
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import gzip
 import hashlib
 import json
@@ -58,6 +63,9 @@ class Deduplication:
     dropped: dict[str, tuple[str, int]]
     sparse_removed: dict[str, int]
     summary: dict
+    token_removed: dict[str, int] = field(default_factory=dict)
+    row_ids: dict[tuple[str, int], int] | None = None
+    token_removed_rows: list[list] = field(default_factory=list)
 
 
 def download(destination: Path) -> None:
@@ -278,6 +286,92 @@ def deduplicate(corpus: Corpus, large_overlap_threshold: int = 10) -> Deduplicat
     return Deduplication(final, canonical, dropped, sparse_removed, summary)
 
 
+def remove_token_overlaps(corpus: Corpus, result: Deduplication,
+                          holdout_products: int = 200, tokenizer=None) -> None:
+    """Remove both sides of same-author/rating token matches across the split.
+
+    Timestamp is not part of this key. Matches with different authors or ratings
+    are deliberately retained. Original exported row IDs and row order survive.
+    """
+    from common import MAX_LENGTH, MODEL_NAME, MODEL_REVISION
+
+    ranked = sorted(result.products, key=lambda p: (-len(result.products[p]), p))
+    if not 0 < holdout_products < len(ranked):
+        raise ValueError("--holdout-products must leave at least one training product")
+    heldout = set(ranked[:holdout_products])
+    if tokenizer is None:
+        from transformers import AutoTokenizer
+        tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, revision=MODEL_REVISION, use_fast=True)
+
+    ordered = [(product, review_id) for product in sorted(result.products)
+               for review_id in sorted(result.products[product])]
+    row_ids = {row: index for index, row in enumerate(ordered, 1)}
+    eval_by_tokens = defaultdict(list)
+    remove = set()
+    matched_pairs = []
+    excluded_pairs = []
+    for split in ("eval", "train"):
+        rows = [row for row in ordered if (row[0] in heldout) == (split == "eval")]
+        print(f"Checking token overlap: {split}, {len(rows):,} reviews", flush=True)
+        for start in range(0, len(rows), 1024):
+            batch = rows[start:start + 1024]
+            texts = [corpus.keys[r][0] + ". " + corpus.keys[r][1] for _, r in batch]
+            encoded = tokenizer(texts, truncation=True, max_length=MAX_LENGTH, padding=False)
+            for row, tokens in zip(batch, encoded["input_ids"], strict=True):
+                key = tuple(tokens)
+                if split == "eval":
+                    eval_by_tokens[key].append(row)
+                    continue
+                _, _, rating, author = corpus.keys[row[1]]
+                for other in eval_by_tokens.get(key, ()):
+                    _, _, other_rating, other_author = corpus.keys[other[1]]
+                    pair = {"eval_id": row_ids[other], "train_id": row_ids[row],
+                            "eval_product": other[0], "train_product": row[0]}
+                    if author == other_author and rating == other_rating:
+                        remove.update((row, other))
+                        matched_pairs.append(pair)
+                    else:
+                        excluded_pairs.append(pair)
+
+    final = {p: {r: metadata for r, metadata in reviews.items() if (p, r) not in remove}
+             for p, reviews in result.products.items()}
+    final = {p: reviews for p, reviews in final.items() if reviews}
+    new_ranking = sorted(final, key=lambda p: (-len(final[p]), p))
+    if set(new_ranking[:holdout_products]) != heldout:
+        raise ValueError("Token cleanup would change the top-product holdout; refusing to change split membership")
+    removed_counts = Counter(p for p, _ in remove)
+    train_removed = sum(p not in heldout for p, _ in remove)
+    eval_removed = len(remove) - train_removed
+    result.summary["after_standard_dedup"] = result.summary["after"]
+    result.summary["after"] = count_summary(map(len, final.values()))
+    result.summary["removed_rows"]["cross_split_token_duplicate_rows"] = len(remove)
+    result.summary["products_emptied_by_token_removal"] = len(result.products) - len(final)
+    result.summary["token_overlap"] = {
+        "enabled": True, "model_name": MODEL_NAME, "model_revision": MODEL_REVISION,
+        "max_length": MAX_LENGTH, "identity_fields": ["input_ids", "UserId", "Score"],
+        "holdout_products": holdout_products, "heldout_product_ids": sorted(heldout),
+        "train_rows_removed": train_removed, "eval_rows_removed": eval_removed,
+        "matched_pairs": matched_pairs,
+        "pairs_excluded_for_author_or_rating_difference": excluded_pairs,
+    }
+    for product, review_id in sorted(remove, key=row_ids.get):
+        title, text, rating, author = corpus.keys[review_id]
+        result.token_removed_rows.append([row_ids[(product, review_id)], product,
+                                         "eval" if product in heldout else "train",
+                                         author, rating, title, text])
+    result.products = final
+    result.row_ids = row_ids
+    result.token_removed = dict(removed_counts)
+    if result.summary["before"]["reviews"] != result.summary["after"]["reviews"] + sum(result.summary["removed_rows"].values()):
+        raise RuntimeError("Review accounting does not balance after token cleanup")
+    removed_products = (result.summary["merged_product_ids"]
+                        + result.summary["products_dropped_for_large_overlap"]
+                        + result.summary["products_emptied_by_shared_review_removal"]
+                        + result.summary["products_emptied_by_token_removal"])
+    if result.summary["before"]["products"] != len(final) + removed_products:
+        raise RuntimeError("Product accounting does not balance after token cleanup")
+
+
 def write_csv(path: Path, columns: list[str], rows) -> None:
     temporary = None
     try:
@@ -300,7 +394,8 @@ def export(corpus: Corpus, result: Deduplication, output_dir: Path) -> None:
         row_id = 0
         for product in sorted(result.products):
             for review_id, metadata in sorted(result.products[product].items()):
-                row_id += 1
+                row_id = (result.row_ids[(product, review_id)] if result.row_ids is not None
+                          else row_id + 1)
                 title, text, rating, user = corpus.keys[review_id]
                 profile, helpful, total, timestamp = metadata
                 yield [row_id, product, user, profile, helpful, total,
@@ -311,11 +406,16 @@ def export(corpus: Corpus, result: Deduplication, output_dir: Path) -> None:
             representative = result.canonical[product]
             witness, overlap = result.dropped.get(representative, ("", 0))
             status = ("dropped_large_overlap" if witness else
-                      "kept" if representative in result.products else "emptied_by_shared_review_removal")
-            yield [product, representative, product != representative, status,
+                      "kept" if representative in result.products else
+                      "emptied_by_token_overlap_removal" if representative in result.token_removed else
+                      "emptied_by_shared_review_removal")
+            values = [product, representative, product != representative, status,
                    witness, overlap, corpus.raw_counts[product], len(corpus.products[product]),
                    result.sparse_removed.get(representative, 0),
                    len(result.products.get(representative, {}))]
+            if result.row_ids is not None:
+                values.append(result.token_removed.get(representative, 0))
+            yield values
 
     write_csv(output_dir / "Reviews.csv", CSV_COLUMNS, review_rows())
     write_csv(output_dir / "product_mapping.csv", [
@@ -323,10 +423,21 @@ def export(corpus: Corpus, result: Deduplication, output_dir: Path) -> None:
         "canonical_status", "dropped_for_overlap_with", "overlap_with_witness",
         "original_review_rows", "original_distinct_reviews",
         "canonical_shared_reviews_removed", "canonical_final_reviews",
-    ], mapping_rows())
+    ] + (["canonical_token_overlap_reviews_removed"] if result.row_ids is not None else []), mapping_rows())
     ranked = sorted(result.products, key=lambda p: (-len(result.products[p]), p))
     write_csv(output_dir / "product_counts.csv", ["rank", "ProductId", "review_count"],
               ((i, p, len(result.products[p])) for i, p in enumerate(ranked, 1)))
+    if result.row_ids is not None:
+        write_csv(output_dir / "token_overlap_removed.csv",
+                  ["Id", "ProductId", "partition", "UserId", "Score", "Summary", "Text"],
+                  result.token_removed_rows)
+        digest = hashlib.sha256()
+        with (output_dir / "Reviews.csv").open("rb") as stream:
+            while chunk := stream.read(1024 * 1024):
+                digest.update(chunk)
+        result.summary["token_overlap"]["output_csv_sha256"] = digest.hexdigest()
+    else:
+        (output_dir / "token_overlap_removed.csv").unlink(missing_ok=True)
     # Written last: this describes the successfully exported run.
     summary_path = output_dir / "dedup_summary.json"
     temporary = summary_path.with_suffix(".json.tmp")
@@ -341,6 +452,10 @@ def main() -> None:
     parser.add_argument("--encoding", default="latin-1", help="Source text encoding (default: latin-1); output is UTF-8")
     parser.add_argument("--large-overlap-threshold", type=int, default=10,
                         help="Drop the smaller product if shared reviews exceed this count (default: 10)")
+    parser.add_argument("--remove-token-overlap", action="store_true",
+                        help="Also remove both sides of same-author/rating BERT-input matches across the split")
+    parser.add_argument("--holdout-products", type=int, default=200,
+                        help="Top-product holdout used by --remove-token-overlap (default: 200)")
     args = parser.parse_args()
     if args.large_overlap_threshold < 0:
         parser.error("--large-overlap-threshold must be nonnegative")
@@ -352,6 +467,8 @@ def main() -> None:
     corpus = load_corpus(iter_snap_records(source, args.encoding))
     print(f"Loaded {sum(corpus.raw_counts.values()):,} rows across {len(corpus.products):,} products", flush=True)
     result = deduplicate(corpus, args.large_overlap_threshold)
+    if args.remove_token_overlap:
+        remove_token_overlaps(corpus, result, args.holdout_products)
     digest = hashlib.sha256()
     with source.open("rb") as stream:
         while chunk := stream.read(1024 * 1024):
