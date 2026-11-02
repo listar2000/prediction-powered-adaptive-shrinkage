@@ -13,20 +13,16 @@ python data/lmarena/summarize_dataset.py --output data/lmarena/sample_data/llm_p
 """
 
 import argparse
+import json
 import os
-from datasets import load_dataset
+from pathlib import Path
 import pandas as pd
 import dotenv
 
-from run_judge_skywork import _is_single_turn
+from run_judge_skywork import _is_single_turn, load_lmarena_dataset
+from revisions import DATASET_REVISION
 
 dotenv.load_dotenv()
-
-
-def load_lmarena_dataset() -> pd.DataFrame:
-    """Load the full LMArena dataset from HuggingFace."""
-    ds = load_dataset("lmarena-ai/arena-human-preference-140k", split="train")
-    return ds.to_pandas()
 
 
 def filter_single_turn_only(df: pd.DataFrame) -> pd.DataFrame:
@@ -122,10 +118,12 @@ def main():
         default=None,
         help="Only output the top N pairs by comparison count"
     )
+    parser.add_argument("--dataset-revision", default=DATASET_REVISION,
+                        help="Dataset commit/tag (pinned by default); use the same revision for scoring")
     args = parser.parse_args()
     
     print("Loading LMArena dataset...")
-    df = load_lmarena_dataset()
+    df = load_lmarena_dataset(args.dataset_revision)
     print(f"Loaded {len(df)} rows")
     
     print("Summarizing comparisons...")
@@ -143,6 +141,8 @@ def main():
     os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
     
     summary.to_csv(args.output, index=False)
+    Path(args.output).with_suffix(".json").write_text(json.dumps(
+        {"arguments": vars(args), "dataset": df.attrs["dataset"]}, indent=2) + "\n")
     print(f"Saved summary to {args.output}")
     print(f"Total unique LLM pairs: {len(summary)}")
     print(f"\nTop 10 pairs by comparison count:")

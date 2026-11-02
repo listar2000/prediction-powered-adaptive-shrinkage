@@ -19,13 +19,15 @@ Usage:
 
     2. Run this script:
        python data/lmarena/run_judge_skywork.py \\
-           --pairs-csv data/lmarena/sample_data/llm_pair_summary.csv \\
+           --pairs-csv data/lmarena/sample_data/llm_pair_summary_single_turn.csv \\
            --output-dir data/lmarena/results_skywork \\
-           --language en --single-turn-only
+           --single-turn-only --prediction-mode bradley-terry
 """
 
 import argparse
 import asyncio
+from collections import Counter
+import json
 import math
 import os
 import re
@@ -37,6 +39,7 @@ from transformers import AutoTokenizer, PreTrainedTokenizer
 from tqdm.asyncio import tqdm
 
 import dotenv
+from revisions import DATASET_REVISION, MODEL_REVISION
 
 dotenv.load_dotenv()
 
@@ -57,10 +60,13 @@ def stable_sigmoid(x: float) -> float:
 # ---------------------------------------------------------------------------
 # Dataset loading & filtering
 # ---------------------------------------------------------------------------
-def load_lmarena_dataset() -> pd.DataFrame:
+def load_lmarena_dataset(revision: str | None = DATASET_REVISION) -> pd.DataFrame:
     """Load the full LMArena dataset from HuggingFace."""
-    ds = load_dataset("lmarena-ai/arena-human-preference-140k", split="train")
-    return ds.to_pandas() # type: ignore
+    ds = load_dataset("lmarena-ai/arena-human-preference-140k", split="train", revision=revision)
+    frame = ds.to_pandas()
+    frame.attrs["dataset"] = {"revision_requested": revision,
+                              "fingerprint": ds._fingerprint, "rows": len(ds)}
+    return frame
 
 
 def _is_single_turn(conv: list[dict]) -> bool:
@@ -185,6 +191,8 @@ async def score_comparison(
             data = resp.json()
             score_a = data[0]["embedding"][0]
             score_b = data[1]["embedding"][0]
+            if not (math.isfinite(score_a) and math.isfinite(score_b)):
+                raise ValueError("Reward scores must be finite")
             return task_idx, score_a, score_b
         except Exception as e:
             print(f"  Error on task {task_idx}: {e}")
@@ -203,6 +211,8 @@ async def judge_pair(
     temperature: float = 1.0,
 ) -> list[dict]:
     """Judge all comparisons for a single LLM pair and return result dicts."""
+    if not math.isfinite(temperature) or temperature <= 0:
+        raise ValueError("Temperature must be finite and positive")
     results: list[dict | None] = [None] * len(df_pair)
     tasks = []
     skipped = 0
@@ -246,7 +256,7 @@ async def judge_pair(
             else:
                 prediction = "model_a" if score_a >= score_b else "model_b"
         else:
-            prediction = "score_error" if prediction_mode == "binary" else None
+            prediction = "score_error"
             skipped += 1
 
         results[task_idx] = {
@@ -292,15 +302,26 @@ def print_pair_summary(results_df: pd.DataFrame) -> None:
     print(f"  Accuracy: {acc:.1%} ({len(results_df)} valid predictions)")
 
 
+def valid_predictions(results_df: pd.DataFrame, prediction_mode: str) -> pd.DataFrame:
+    """Keep valid predictions, retaining failure markers in the detailed CSV."""
+    if prediction_mode == "bradley-terry":
+        numeric = pd.to_numeric(results_df["prediction"], errors="coerce")
+        clean = results_df.loc[numeric.between(0, 1)].copy()
+        clean["prediction"] = numeric.loc[clean.index].astype(float)
+        return clean
+    return results_df.loc[results_df["prediction"].isin(["model_a", "model_b"])].copy()
+
+
 async def run_pipeline(args) -> None:
     """Main async pipeline: load once, judge every pair, save results."""
     # Load tokenizer
     print(f"Loading tokenizer for {args.model_name}...")
-    tokenizer = AutoTokenizer.from_pretrained(args.model_name)
+    tokenizer = AutoTokenizer.from_pretrained(args.model_name, revision=args.model_revision)
 
     # Load dataset
     print("Loading LMArena dataset...")
-    df = load_lmarena_dataset()
+    df = load_lmarena_dataset(args.dataset_revision)
+    dataset_metadata = df.attrs["dataset"]
     print(f"Loaded {len(df)} rows")
 
     # Apply global filters
@@ -325,6 +346,7 @@ async def run_pipeline(args) -> None:
     classify_url = f"http://localhost:{args.port}/classify"
     semaphore = asyncio.Semaphore(args.max_concurrent)
     all_summary_rows: list[pd.DataFrame] = []
+    excluded = Counter()
 
     async with httpx.AsyncClient(timeout=httpx.Timeout(300.0)) as client:
         for pair_idx, pair_row in pairs_df.iterrows():
@@ -369,10 +391,13 @@ async def run_pipeline(args) -> None:
                 "prediction", "score_a", "score_b",
             ]
 
-            if args.prediction_mode == "bradley-terry":
-                clean_results_df = results_df[results_df["prediction"].notna()]
-            else:
-                clean_results_df = results_df[results_df["prediction"].isin(["model_a", "model_b"])]
+            clean_results_df = valid_predictions(results_df, args.prediction_mode)
+            failures = results_df.loc[~results_df.index.isin(clean_results_df.index), "prediction"]
+            reasons = Counter(value if value in ("parse_error", "score_error") else "invalid_prediction"
+                              for value in failures)
+            excluded.update(reasons)
+            if reasons:
+                print(f"  Excluded: {dict(reasons)}")
             all_summary_rows.append(clean_results_df[summary_cols])
             print_pair_summary(clean_results_df)
 
@@ -404,6 +429,13 @@ async def run_pipeline(args) -> None:
     else:
         print("\nNo pairs had any comparisons. Nothing was saved.")
 
+    metadata = {"arguments": vars(args), "dataset": dataset_metadata,
+                "tokenizer_commit": tokenizer.init_kwargs.get("_commit_hash"),
+                "valid_comparisons": sum(len(frame) for frame in all_summary_rows),
+                "excluded": dict(excluded)}
+    with open(os.path.join(args.output_dir, "run_metadata.json"), "w") as stream:
+        json.dump(metadata, stream, indent=2)
+
 
 # ---------------------------------------------------------------------------
 # CLI
@@ -414,6 +446,7 @@ python data/lmarena/run_judge_skywork.py \
 --pairs-csv data/lmarena/sample_data/llm_pair_summary_single_turn.csv \
 --output-dir data/lmarena/results_skywork \
 --single-turn-only \
+--prediction-mode bradley-terry \
 --max-concurrent 128 \
 """
 
@@ -456,6 +489,10 @@ def main():
         default=DEFAULT_MODEL,
         help="Model name for the Skywork reward model",
     )
+    parser.add_argument("--dataset-revision", default=DATASET_REVISION,
+                        help="Dataset commit/tag (pinned by default); use the same revision for pair selection")
+    parser.add_argument("--model-revision", default=None,
+                        help="Tokenizer commit/tag (pinned for the default model); use the same server --revision")
     parser.add_argument(
         "--prediction-mode",
         type=str,
@@ -487,6 +524,10 @@ def main():
         help="Debug mode: only process first 10 rows per pair",
     )
     args = parser.parse_args()
+    if args.model_revision is None and args.model_name == DEFAULT_MODEL:
+        args.model_revision = MODEL_REVISION
+    if not math.isfinite(args.temperature) or args.temperature <= 0:
+        parser.error("--temperature must be finite and positive")
 
     asyncio.run(run_pipeline(args))
 
